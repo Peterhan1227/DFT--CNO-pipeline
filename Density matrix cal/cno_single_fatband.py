@@ -27,7 +27,7 @@ from vaspwfc import vaspwfc
 
 # ── user settings ─────────────────────────────────────────────────────────────
 ispin     = 1        # 1 = spin-up (or non-spin-polarised), 2 = spin-down
-cno_index = 0
+cno_index = 3
 efermi    = 5.9837
 ylim      = [-15, 15]
 cmap      = LinearSegmentedColormap.from_list("wt_red", ["white", "crimson"])
@@ -359,18 +359,28 @@ for ik in range(1, nkpts + 1):
     gy   = gvec[:, 1] % Ny
     gz   = gvec[:, 2] % Nz
 
+    nG = len(gx)
     for ib in range(1, nbands + 1):
         coeff = wfc.readBandCoeff(ispin=ispin, ikpt=ik, iband=ib, norm=True)
 
         coeff_grid = np.zeros((Nx, Ny, Nz), dtype=np.complex128)
-        coeff_grid[gx, gy, gz] = coeff
-
-        # IFFT + scale: ||u_flat||² = Σ|coeff|² ≈ 1  (norm=True)
-        u_r    = np.fft.ifftn(coeff_grid) * np.sqrt(Nr)
-        u_flat = u_r.reshape(Nr)
-
-        amp = np.vdot(cno, u_flat)           # Σ_r  CNO*(r) u_nk(r)
-        weights[ib - 1, ik - 1] = np.abs(amp) ** 2
+        if LSORBIT:
+            # SOC spinor: coeff is (2*nG,) — first nG spin-up, next nG spin-down.
+            # CNO is scalar (spin-traced), so sum overlaps from both components.
+            coeff_grid_dn = np.zeros((Nx, Ny, Nz), dtype=np.complex128)
+            coeff_grid[gx, gy, gz]    = coeff[:nG]
+            coeff_grid_dn[gx, gy, gz] = coeff[nG:]
+            u_up = np.fft.ifftn(coeff_grid)    * np.sqrt(Nr)
+            u_dn = np.fft.ifftn(coeff_grid_dn) * np.sqrt(Nr)
+            amp_up = np.vdot(cno, u_up.reshape(Nr))
+            amp_dn = np.vdot(cno, u_dn.reshape(Nr))
+            weights[ib - 1, ik - 1] = np.abs(amp_up) ** 2 + np.abs(amp_dn) ** 2
+        else:
+            coeff_grid[gx, gy, gz] = coeff
+            u_r    = np.fft.ifftn(coeff_grid) * np.sqrt(Nr)
+            u_flat = u_r.reshape(Nr)
+            amp = np.vdot(cno, u_flat)           # Σ_r  CNO*(r) u_nk(r)
+            weights[ib - 1, ik - 1] = np.abs(amp) ** 2
 
     if ik == 1 or ik % 10 == 0 or ik == nkpts:
         print(f"  k-point {ik:4d}/{nkpts}  "
