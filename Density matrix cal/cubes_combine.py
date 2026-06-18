@@ -17,7 +17,7 @@ cube_dir = base_dir / "Data" / MATERIAL / "output" / OUTPUT_SUBDIR / "cno_cubes"
 
 # ── user settings ─────────────────────────────────────────────────────────────
 # Number of CNO cube files to combine (cno_000 through cno_{n_combine-1}).
-n_combine = 7
+n_combine = 4
 
 # If True, normalize each input cube so its scalar grid sums to 1 before
 # summing. Since individual CNO cubes from export_cno_cubes.py are already

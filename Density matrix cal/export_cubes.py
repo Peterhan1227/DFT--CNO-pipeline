@@ -1,8 +1,4 @@
 import numpy as np
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
 from pathlib import Path
 from config import MATERIAL, OUTPUT_SUBDIR
 from ws_cell import read_poscar_structure
@@ -166,88 +162,48 @@ def write_cube_scalar(path, scalar_grid, latvec, atom_numbers, cart_coords,
 # ── export top CNOs ───────────────────────────────────────────────────────────
 print(f"\nExporting top {n_export_cno} CNOs to: {cube_dir}")
 
-if ws_mode:
-    # ── WS mode: export point-cloud data ─────────────────────────────────────
-    for i in range(n_export_cno):
-        cno     = eigvecs[:, i]
-        density = np.abs(cno) ** 2
-        density = density / density.sum()
+for i in range(n_export_cno):
+    cno     = eigvecs[:, i]
+    density = np.abs(cno) ** 2
+    density = density / density.sum()
 
-        npz_path = cube_dir / f"cno_{i:03d}_ws_points.npz"
+    if ws_mode:
+        # Save WS point cloud for any further analysis
         np.savez(
-            npz_path,
-            points_cart   = ws_points_cart,
-            density       = density,
-            complex_values= cno,
-            occupation    = np.array(eigvals[i]),
+            cube_dir / f"cno_{i:03d}_ws_points.npz",
+            points_cart    = ws_points_cart,
+            density        = density,
+            complex_values = cno,
+            occupation     = np.array(eigvals[i]),
         )
-        print(f"  Saved WS point cloud: {npz_path.name}  (occupation={eigvals[i]:.6e})")
+        # Back-map density to the primitive cell grid.
+        # |CNO|^2 has full crystal periodicity, so the value at the WS
+        # representative r_ws equals the value at the primitive grid point —
+        # the back-mapped cube is the correct density for VESTA visualisation.
+        if ws_base_indices is None:
+            print(f"  WARNING: ws_base_indices missing, cannot write cube for CNO {i}")
+            continue
+        grid_3d = np.zeros((Nx, Ny, Nz), dtype=float)
+        grid_3d[ws_base_indices[:, 0],
+                ws_base_indices[:, 1],
+                ws_base_indices[:, 2]] = density
+    else:
+        grid_3d = density.reshape(Nx, Ny, Nz)
+        np.save(cube_dir / f"cno_{i:03d}_complex_grid.npy", cno.reshape(Nx, Ny, Nz))
 
-        # 3D scatter plot of WS density (subsample for manageable plot size)
-        step = max(1, Nr // 5000)
-        pts_sub   = ws_points_cart[::step]
-        dens_sub  = density[::step]
-
-        fig = plt.figure(figsize=(7, 6))
-        ax  = fig.add_subplot(111, projection="3d")
-        sc  = ax.scatter(
-            pts_sub[:, 0], pts_sub[:, 1], pts_sub[:, 2],
-            c=dens_sub, cmap="hot_r", s=4, alpha=0.6,
-            norm=matplotlib.colors.LogNorm(
-                vmin=max(dens_sub.min(), dens_sub.max() * 1e-4),
-                vmax=dens_sub.max(),
-            ),
-        )
-        fig.colorbar(sc, ax=ax, pad=0.1, label="|CNO|² (normalised)")
-        ax.set_xlabel("x (Å)")
-        ax.set_ylabel("y (Å)")
-        ax.set_zlabel("z (Å)")
-        ax.set_title(f"CNO {i} density on WS grid  occ={eigvals[i]:.4e}")
-        plt.tight_layout()
-        scatter_path = cube_dir / f"cno_{i:03d}_ws_scatter.png"
-        fig.savefig(scatter_path, dpi=120, bbox_inches="tight")
-        plt.close(fig)
-        print(f"  Saved WS scatter plot: {scatter_path.name}")
-
-        # Optional debug cube back-mapped via ws_base_indices
-        if ws_base_indices is not None:
-            debug_grid = np.zeros((Nx, Ny, Nz), dtype=float)
-            debug_grid[ws_base_indices[:, 0],
-                       ws_base_indices[:, 1],
-                       ws_base_indices[:, 2]] = density
-            debug_path = cube_dir / f"cno_{i:03d}_ws_debug_backmapped.cube"
-            write_cube_scalar(
-                debug_path,
-                debug_grid,
-                latvec,
-                atom_numbers,
-                cart_coords,
-                comment1=f"[DEBUG ONLY] CNO {i} WS density back-mapped to primitive cell indices",
-                comment2=f"True geometry is the WS point cloud, not this cube",
-            )
-            print(f"  Saved debug back-mapped cube (DEBUG ONLY): {debug_path.name}")
-
-else:
-    # ── primitive-grid mode: original cube export ─────────────────────────────
-    for i in range(n_export_cno):
-        cno     = eigvecs[:, i].reshape(Nx, Ny, Nz)
-        density = np.abs(cno) ** 2
-        density = density / density.sum()
-
-        sx, sy, sz = CUBE_SUPERCELL
-        cube_path = cube_dir / f"cno_{i:03d}_density.cube"
-        write_cube_scalar(
-            cube_path,
-            density,
-            latvec,
-            atom_numbers,
-            cart_coords,
-            comment1=f"CNO {i} density |phi(r)|^2",
-            comment2=f"occupation = {eigvals[i]:.10e}; normalized discrete sum = 1",
-            supercell=CUBE_SUPERCELL,
-        )
-        np.save(cube_dir / f"cno_{i:03d}_complex_grid.npy", cno)
-        print(f"  Exported: {cube_path.name}  (occupation = {eigvals[i]:.6e})  [{sx}×{sy}×{sz} supercell]")
+    sx, sy, sz = CUBE_SUPERCELL
+    cube_path = cube_dir / f"cno_{i:03d}_density.cube"
+    write_cube_scalar(
+        cube_path,
+        grid_3d,
+        latvec,
+        atom_numbers,
+        cart_coords,
+        comment1=f"CNO {i} density |phi(r)|^2",
+        comment2=f"occupation = {eigvals[i]:.10e}; normalized discrete sum = 1",
+        supercell=CUBE_SUPERCELL,
+    )
+    print(f"  Exported: {cube_path.name}  (occupation = {eigvals[i]:.6e})  [{sx}×{sy}×{sz} supercell]")
 
 print("Done.")
 
@@ -264,8 +220,8 @@ with open(meta_path, "w") as f:
     f.write(f"number of exported CNOs     : {n_export_cno}\n")
     f.write(f"cube output directory       : {cube_dir}\n")
     if ws_mode:
-        f.write("NOTE: WS mode — exports are point-cloud .npz files and scatter plots.\n")
-        f.write("NOTE: back-mapped .cube files are DEBUG ONLY; true geometry is the WS point cloud.\n")
+        f.write("NOTE: WS mode — density back-mapped to primitive grid for cube export.\n")
+        f.write("NOTE: WS point clouds also saved as .npz per CNO.\n")
     else:
         f.write("NOTE: cube files contain normalized |CNO_i(r)|^2, not the complex CNO.\n")
         f.write("NOTE: complex CNO grids saved separately as .npy files in cube directory.\n")
