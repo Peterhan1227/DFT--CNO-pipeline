@@ -9,7 +9,7 @@ LSORBIT  = False   # True for non-collinear (SOC) calculations, False otherwise
 # All scripts write to  Data/<MATERIAL>/output/<OUTPUT_SUBDIR>/
 # Change this to keep different parameter runs side-by-side, e.g. "original",
 # "isym0", "ws_bond".  Never leave it empty — every run needs a name.
-OUTPUT_SUBDIR = "testing"
+OUTPUT_SUBDIR = "testing2"
 
 # ── density matrix settings ───────────────────────────────────────────────────
 ISPIN = 1                      # 1 = spin-up / non-spin-polarised,  2 = spin-down

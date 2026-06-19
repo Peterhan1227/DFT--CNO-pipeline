@@ -22,41 +22,42 @@ exported CNO occupations:
   CNO   8 : 3.8640103394e-02
   CNO   9 : 3.8338206167e-02
 
-=== symmetry_adapt_cnos ===
+=== symmetry_adapt_cnos (interpolation mode) ===
 operation     : swap_xy   center = [0.875 0.875 0.875]
 indices       : [2, 3]
 
 D:
-[[ 0.18026 +0.j       -0.974774+0.000002j]
- [-0.974774-0.000002j -0.159198+0.j      ]]
+[[ 0.175067+0.j       -0.979473+0.000002j]
+ [-0.979473-0.000002j -0.165409+0.j      ]]
 D^HD:
-[[ 0.982677+0.j -0.02053 +0.j]
- [-0.02053 -0.j  0.975528+0.j]]
-norm(D^HD - I) : 4.1737e-02
-eigenvalues   : [ 0.999971-0.j -0.978909+0.j]
-|eigenvalues|  : [0.999971 0.978909]
+[[ 0.990017+0.j -0.00946 +0.j]
+ [-0.00946 -0.j  0.986728+0.j]]
+norm(D^HD - I) : 2.1326e-02
+eigenvalues   : [ 0.998987-0.j -0.989328+0.j]
+|eigenvalues|  : [0.998987 0.989328]
 
-Leakage of R|phi_j> outside subspace:
-  CNO 2: 1.3162e-01  <-- expand indices
-  CNO 3: 1.5644e-01  <-- expand indices
+Leakage of R|phi_j> outside selected subspace:
+  Note: residual_norm = sqrt(weight_leakage), so residual_norm=0.13 means weight_leakage~0.017, not 13%.
+  CNO 2:  inside_weight=0.995184  weight_leakage=4.8158e-03  residual_norm=6.9396e-02  <-- expand indices
+  CNO 3:  inside_weight=0.992895  weight_leakage=7.1049e-03  residual_norm=8.4290e-02  <-- expand indices
 
-Density symmetry  ||rho[src_map] - rho|| / ||rho||:
-  CNO 2: 9.5495e-03
-  CNO 3: 2.9858e-02  <-- not symmetric
+Density symmetry  ||R(rho) - rho|| / ||rho||:
+  CNO 2: 1.1916e-02
+  CNO 3: 6.5442e-02  <-- not symmetric
 
-Eigenstate residual  ||phi[src_map] - eta*phi|| / ||phi||:
-  CNO 2  eta=1.0000-0.0000j: 7.6537e-03
-  CNO 3  eta=-0.9789+0.0000j: 2.0430e-01  <-- not clean eigenstate
+Eigenstate residual  ||R(phi) - eta*phi|| / ||phi||:
+  CNO 2  eta=0.9990-0.0000j: 3.2274e-02
+  CNO 3  eta=-0.9893+0.0000j: 1.0397e-01  <-- not clean eigenstate
 
 R-invariance by degenerate group (occ >= 0.03):
   group [0]  occ=[0.9717]
-    |<phi|R phi>| = 0.999980
+    |<phi|R phi>| = 0.999027
   group [1]  occ=[0.6111]
-    |<phi|R phi>| = 0.999966
+    |<phi|R phi>| = 0.998863
   group [2, 3]  occ=[0.5020, 0.5017]  [selected ¡ª see above]
   group [4]  occ=[0.3770]
-    |<phi|R phi>| = 0.999909
+    |<phi|R phi>| = 0.999347
   group [5, 6]  occ=[0.3659, 0.3657]
-    norm(D^HD-I)=2.9408e-02  leakage=1.3016e-01  <-- not R-invariant; expand indices
+    norm(D^HD-I)=1.5161e-02  residual_norm=6.9361e-02  <-- not R-invariant; expand indices
   group [7, 8, 9, 10]  occ=[0.0443, 0.0386, 0.0383, 0.0327]
-    norm(D^HD-I)=6.1622e-02  leakage=2.0749e-01  <-- not R-invariant; expand indices
+    norm(D^HD-I)=2.5804e-01  residual_norm=2.3242e-01  <-- not R-invariant; expand indices

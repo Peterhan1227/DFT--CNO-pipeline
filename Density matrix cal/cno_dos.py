@@ -133,12 +133,12 @@ eigenval_dos_path = (data_dir / "EIGENVAL_dos" if (data_dir / "EIGENVAL_dos").ex
 poscar_path       = data_dir / "POSCAR"
 doscar_path       = data_dir / "DOSCAR"
 
-cno_orb_file    = output_dir / "cno_orbitals.npy"
+cno_orb_file    = output_dir / "cnos_sym_adapted.npy"
 cno_occ_file    = output_dir / "cno_occupations.npy"
 grid_shape_file = output_dir / "fft_grid_shape.npy"
 
 for p, label in [
-    (cno_orb_file,       "cno_orbitals.npy"),
+    (cno_orb_file,       "cnos_sym_adapted.npy"),
     (cno_occ_file,       "cno_occupations.npy"),
     (grid_shape_file,    "fft_grid_shape.npy"),
     (wavecar_dos_path,   "WAVECAR_dos / WAVECAR"),
