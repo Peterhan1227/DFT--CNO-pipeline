@@ -28,13 +28,26 @@ from config import EFERMI
 
 # ── user settings ─────────────────────────────────────────────────────────────
 ispin       = 1        # 1 = spin-up (or non-spin-polarised), 2 = spin-down
-cno_indices = list(range(0, 4))   # e.g. list(range(0, 9))  or  [1, 3, 4, 5]
+cno_indices = list(range(0, 5))   # e.g. list(range(0, 9))  or  [1, 3, 4, 5]
 efermi      = EFERMI
 ylim      = [-15, 15]
 cmap      = LinearSegmentedColormap.from_list("wt_red", ["white", "crimson"])
 linewidth = 2.5
 interpolate_for_plot      = False
 interp_points_per_segment = 3
+
+# ── 3D CNO snapshot (optional; requires the standalone CNO-Visualizer package) ──
+# When on, each plotted CNO also gets a rotating 3D density-isosurface GIF saved
+# next to its fatband PNG — a VESTA-like view (no phase) for reports.  The GIF is
+# rendered from the SAME cnos_sym_adapted vector being plotted, so it always
+# matches the fatband.  Set render_cno_3d = False to skip entirely.
+render_cno_3d    = True
+cno_3d_iso       = 0.5          # isosurface level as a fraction of max |psi|^2
+cno_3d_replicate = (2, 2, 2)    # primitive cells drawn around the orbital
+cno_3d_seconds     = 10.0        # clip length in seconds (camera turns the whole time)
+cno_3d_fps         = 15         # GIF frame rate (lower = smaller file)
+cno_3d_deg_per_sec = 12.0       # camera turn speed in deg/s (lower = slower)
+cno_3d_spin_axis   = "z"        # camera turns about this axis ("x"/"y"/"z")
 
 # ── paths ─────────────────────────────────────────────────────────────────────
 base_dir        = base_dir = __import__("pathlib").Path(__file__).resolve().parent
@@ -427,6 +440,18 @@ for ik in range(1, nkpts + 1):
         w_sum_k = weights_all[:, :, ik - 1].sum(axis=0)
         print(f"  k-point {ik:4d}/{nkpts}  max summed weight: {w_sum_k.max():.4f}")
 
+# ── optional: set up the 3D isosurface snapshot renderer ─────────────────────
+_render_3d = render_cno_3d
+if _render_3d:
+    try:
+        from cno_visualizer.snapshot import render_density_gif
+        from ws_cell import read_poscar_structure
+        _lat3d, _, _, _asym3d, _, _, _acart3d = read_poscar_structure(poscar_path)
+        print("3D snapshots         : ON  (CNO-Visualizer found)")
+    except Exception as exc:
+        print(f"3D snapshots         : OFF — CNO-Visualizer unavailable ({exc})")
+        _render_3d = False
+
 # ── per-CNO output: weights, CSV, metadata, plots ────────────────────────────
 print()
 for ci, idx in enumerate(cno_indices):
@@ -533,5 +558,25 @@ for ci, idx in enumerate(cno_indices):
     plt.close(fig2)
 
     print(f"  CNO {idx:3d}  max_w={vmax:.4f}  → {lc_path.name},  {sc_path.name}")
+
+    # 3D density-isosurface GIF (VESTA-like, no phase) of this same CNO.
+    if _render_3d:
+        try:
+            u3d = cno_orbs[:, idx]
+            if ws_mode:
+                g3 = np.zeros((Nx, Ny, Nz), dtype=np.complex128)
+                g3[_prim_indices[:, 0], _prim_indices[:, 1], _prim_indices[:, 2]] = u3d
+            else:
+                g3 = u3d.reshape(Nx, Ny, Nz)
+            gif_path = fatband_dir / f"cno_{idx:03d}_structure.gif"
+            render_density_gif(
+                g3, _lat3d, _acart3d, _asym3d, str(gif_path),
+                iso_fraction=cno_3d_iso, replication=cno_3d_replicate,
+                seconds=cno_3d_seconds, fps=cno_3d_fps,
+                deg_per_sec=cno_3d_deg_per_sec, spin_axis=cno_3d_spin_axis,
+            )
+            print(f"  CNO {idx:3d}  3D isosurface → {gif_path.name}")
+        except Exception as exc:
+            print(f"  CNO {idx:3d}  3D render skipped: {exc}")
 
 print("\nAll done.")

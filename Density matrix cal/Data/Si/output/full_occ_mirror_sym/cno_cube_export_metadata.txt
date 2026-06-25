@@ -1,0 +1,69 @@
+source cno_occupations      : C:\Users\hanziruopeter\OneDrive\Personal files\Academic\Physics\Research\Columbia Raquel\Density matrix cal\Data\Si\output\full_occ_mirror_sym\cno_occupations.npy
+source cno_orbitals         : C:\Users\hanziruopeter\OneDrive\Personal files\Academic\Physics\Research\Columbia Raquel\Density matrix cal\Data\Si\output\full_occ_mirror_sym\cno_orbitals.npy
+POSCAR path                 : C:\Users\hanziruopeter\OneDrive\Personal files\Academic\Physics\Research\Columbia Raquel\Density matrix cal\Data\Si\POSCAR
+grid shape (Nx, Ny, Nz)     : (13, 13, 13)
+grid shape source           : fft_grid_shape.npy
+Nr (flat grid points)       : 2197
+ws_mode                     : True
+number of exported CNOs     : 10
+cube output directory       : C:\Users\hanziruopeter\OneDrive\Personal files\Academic\Physics\Research\Columbia Raquel\Density matrix cal\Data\Si\output\full_occ_mirror_sym\cno_cubes
+NOTE: WS mode ¡ª density back-mapped to primitive grid for cube export.
+NOTE: WS point clouds also saved as .npz per CNO.
+
+exported CNO occupations:
+  CNO   0 : 9.7171520950e-01
+  CNO   1 : 6.1106691312e-01
+  CNO   2 : 5.0200993507e-01
+  CNO   3 : 5.0170633019e-01
+  CNO   4 : 3.7702608069e-01
+  CNO   5 : 3.6589942815e-01
+  CNO   6 : 3.6574058891e-01
+  CNO   7 : 4.4274667899e-02
+  CNO   8 : 3.8640103394e-02
+  CNO   9 : 3.8338206167e-02
+
+=== symmetry_adapt_cnos (interpolation mode) ===
+operation     : swap_xy   center = [0.875 0.875 0.875]
+index_groups  : [[2, 3]]
+
+--- indices [2, 3] ---
+D:
+[[ 0.767879+0.j        0.637159-0.000002j]
+ [ 0.637159+0.000002j -0.758111-0.j      ]]
+D^HD:
+[[0.99561 +0.j 0.006224-0.j]
+ [0.006224+0.j 0.980703+0.j]]
+norm(D^HD - I) : 2.1659e-02
+eigenvalues    : [ 0.998933-0.j -0.989164+0.j]
+|eigenvalues|   : [0.998933 0.989164]
+
+Leakage of R|phi_j> outside selected subspace:
+  CNO 2:  inside_weight=0.997875  weight_leakage=2.1245e-03  residual_norm=sqrt(weight_leakage)=4.6092e-02
+  CNO 3:  inside_weight=0.989950  weight_leakage=1.0050e-02  residual_norm=sqrt(weight_leakage)=1.0025e-01
+
+Density symmetry  ||R(rho) - rho|| / ||rho||:
+  CNO 2: 1.2386e-02
+  CNO 3: 6.6091e-02
+
+Eigenstate residual  ||R(phi) - eta*phi|| / ||phi||:
+  CNO 2  eta=0.9989-0.0000j: 3.3121e-02
+  CNO 3  eta=-0.9892+0.0000j: 1.0478e-01
+
+R-invariance by degenerate group (occ >= 0.03):
+  group [0]  occ=[0.9717]
+    |<phi|R phi>| = 0.999024
+  group [1]  occ=[0.6111]
+    |<phi|R phi>| = 0.998834
+  group [2, 3]  occ=[0.5020, 0.5017]  [selected -- see above]
+  group [4]  occ=[0.3770]
+    |<phi|R phi>| = 0.999304
+  group [5, 6]  occ=[0.3659, 0.3657]
+    max_weight_leakage=7.6936e-03  max_residual_norm=8.7713e-02  norm(D^HD-I)=1.5638e-02
+  group [7, 8, 9, 10]  occ=[0.0443, 0.0386, 0.0383, 0.0327]
+    max_weight_leakage=6.9268e-02  max_residual_norm=2.6319e-01  norm(D^HD-I)=2.6323e-01  <-- not R-invariant; expand indices
+
+Symmetry diagnostic summary:
+  selected-subspace maximum weight leakage   : 1.0050e-02
+  maximum singleton overlap deviation from 1 : 1.1660e-03
+  D-matrix unitarity error (max across groups): 2.1659e-02
+  result: PASS WITH SMALL INTERPOLATION ERROR

@@ -1,0 +1,15 @@
+cno_index               : 3
+cno_occupation          : 5.0170633019e-01
+total_weight            : 89.7141256528
+max_weight              : 0.7995092134
+efermi                  : 5.9837
+ispin                   : 1
+grid shape (Nx, Ny, Nz) : (13, 13, 13)
+nkpts                   : 100
+nbands                  : 48
+k-axis source           : KPOINTS + POSCAR (Ang^-1)
+ws_mode                 : True
+NOTE: weight = |<CNO | psi_nk>|^2
+NOTE: psi_nk(r) = u_nk(r) * exp(2*pi*i * k_frac . r_frac_cont)
+NOTE: in WS mode r_frac_cont is the continuous (unwrapped) WS coord
+NOTE: interpolation (if used) is only for plotting scalar weights/energies, not wavefunctions.

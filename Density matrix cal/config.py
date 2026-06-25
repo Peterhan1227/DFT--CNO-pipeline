@@ -9,12 +9,12 @@ LSORBIT  = False   # True for non-collinear (SOC) calculations, False otherwise
 # All scripts write to  Data/<MATERIAL>/output/<OUTPUT_SUBDIR>/
 # Change this to keep different parameter runs side-by-side, e.g. "original",
 # "isym0", "ws_bond".  Never leave it empty — every run needs a name.
-OUTPUT_SUBDIR = "testing2"
+OUTPUT_SUBDIR = "5eV_window_mirror_sym"
 
 # ── density matrix settings ───────────────────────────────────────────────────
 ISPIN = 1                      # 1 = spin-up / non-spin-polarised,  2 = spin-down
 
-RESTRICT_TO_FERMI_WINDOW = False   # True = include only bands within ±FERMI_WINDOW_EV of EFERMI
+RESTRICT_TO_FERMI_WINDOW = True   # True = include only bands within ±FERMI_WINDOW_EV of EFERMI
 EFERMI          = 5.9837           # Fermi energy (eV); used only when RESTRICT_TO_FERMI_WINDOW = True
 FERMI_WINDOW_EV = 5.0              # half-width of the energy window (eV)
 

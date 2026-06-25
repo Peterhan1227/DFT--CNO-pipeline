@@ -1,0 +1,93 @@
+=== CNO density matrix metadata ===
+
+material                : Si
+LSORBIT                 : False
+ispin                   : 1
+restrict_to_fermi_window: True
+efermi                  : 5.9837 eV
+fermi_window_ev         : 5.0 eV
+fft_grid                : (13, 13, 13)
+volume_Ang3             : 40.329527
+nkpts                   : 3375
+nbands                  : 8
+
+--- k-point coordinates ---
+kcoord_source           : EIGENVAL
+kfrac[   0]             : [1.262379e-15, 1.262379e-15, 1.262379e-15]
+kfrac[   1]             : [0.06666667, 1.262729e-15, 1.262729e-15]
+kfrac[   2]             : [0.1333333, 1.26623e-15, 1.26623e-15]
+  ...
+kfrac[3372]             : [-0.2, -0.06666667, -0.06666667]
+kfrac[3373]             : [-0.1333333, -0.06666667, -0.06666667]
+kfrac[3374]             : [-0.06666667, -0.06666667, -0.06666667]
+
+--- k-point weights ---
+kweight_source          : EIGENVAL
+kweight_sum             : 1.00000000
+kweight_min             : 0.00029630
+kweight_max             : 0.00029630
+kweights_uniform        : True
+
+--- Wigner-Seitz cell ---
+USE_WS_CELL             : True
+ws_center_input         : [0.875, 0.875, 0.875]  (fractional)
+ws_center_frac_wrapped  : [0.875, 0.875, 0.875]
+ws_center_cart_Ang      : [-4.76324, -4.76324, -4.76324]
+ws_translation_nmax     : 3
+ws_translation_min      : [0, 0, 0]
+ws_translation_max      : [1, 1, 1]
+ws_n_unique_translations: 8
+
+--- physical ---
+bloch_phase             : psi_nk(r) = exp(2*pi*i * k_frac . r_frac_cont) * u_nk(r)
+rho_hermiticity_error   : 4.3750e-19
+Tr(rho)                 : 4.91703704
+spin_trace_note         : occupations > 1.5 were halved before accumulation;
+                          Tr counts spatial orbitals, not spin-orbitals.
+                          Expected Tr ~ 4 for primitive Si (4 occupied spatial bands).
+sample_psi_norms_ik1    : ['1.000000', '1.000000', '1.000000']
+
+--- CNO spectrum ---
+sum_cno_occ             : 4.9170370370
+n_eigenvalues_gt_1e-6   : 108
+top_20_cno_occupations  :
+  CNO   0 : 6.6116637757e-01
+  CNO   1 : 6.6087695028e-01
+  CNO   2 : 5.6670077791e-01
+  CNO   3 : 4.3809563988e-01
+  CNO   4 : 4.3781155193e-01
+  CNO   5 : 4.1970314541e-01
+  CNO   6 : 2.4206111516e-01
+  CNO   7 : 2.3193436544e-01
+  CNO   8 : 2.3090848641e-01
+  CNO   9 : 1.9618722019e-01
+  CNO  10 : 1.3549087141e-01
+  CNO  11 : 1.3521165883e-01
+  CNO  12 : 1.1816450378e-01
+  CNO  13 : 1.1794790739e-01
+  CNO  14 : 3.9574234674e-02
+  CNO  15 : 3.4210787033e-02
+  CNO  16 : 2.6872208381e-02
+  CNO  17 : 2.4654339000e-02
+  CNO  18 : 2.4525723702e-02
+  CNO  19 : 2.3846094739e-02
+gaps_between_top_20     :
+  gap  0¡ú1  : 2.8943e-04
+  gap  1¡ú2  : 9.4176e-02
+  gap  2¡ú3  : 1.2861e-01
+  gap  3¡ú4  : 2.8409e-04
+  gap  4¡ú5  : 1.8108e-02
+  gap  5¡ú6  : 1.7764e-01
+  gap  6¡ú7  : 1.0127e-02
+  gap  7¡ú8  : 1.0259e-03
+  gap  8¡ú9  : 3.4721e-02
+  gap  9¡ú10 : 6.0696e-02
+  gap 10¡ú11 : 2.7921e-04
+  gap 11¡ú12 : 1.7047e-02
+  gap 12¡ú13 : 2.1660e-04
+  gap 13¡ú14 : 7.8374e-02
+  gap 14¡ú15 : 5.3634e-03
+  gap 15¡ú16 : 7.3386e-03
+  gap 16¡ú17 : 2.2179e-03
+  gap 17¡ú18 : 1.2862e-04
+  gap 18¡ú19 : 6.7963e-04

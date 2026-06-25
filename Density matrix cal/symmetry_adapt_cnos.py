@@ -14,8 +14,8 @@ from scipy.ndimage import map_coordinates
 from config import MATERIAL, OUTPUT_SUBDIR, WS_CENTER_COORD_TYPE, WS_CENTER
 
 # ── settings ──────────────────────────────────────────────────────────────────
-indices          = [2, 3]       # CNO subspace to symmetry-adapt
-operation        = "c3_111"    # "swap_xy" | "c3_111" | "inversion"
+index_groups     = [[2, 3]]     # list of degenerate subspaces to symmetry-adapt, e.g. [[2,3],[4,5,6]]
+operation        = "swap_xy"    # "swap_xy" | "c3_111" | "inversion"
 out_name         = "cnos_sym_adapted.npy"
 export_cubes     = True         # True: swap cno_orbitals.npy -> out_name, run export_cubes.py, restore
 check_occ_cutoff = 0.03         # check non-selected CNOs with occupation above this value
@@ -76,16 +76,35 @@ elif WS_CENTER_COORD_TYPE == "fractional":
 else:
     center = np.load(output_dir / "ws_center_frac_wrapped.npy").astype(float)
 
-# R^{-1} acts on fractional coordinates: r_src = R^{-1}(r - c) + c
-# inversion:  r -> 2c - r
-# c3_111:     forward (x,y,z)->(y,z,x),  inverse (x,y,z)->(z,x,y)
-# swap_xy:    (x,y,z)->(y,x,z), self-inverse
-R_INV = {
-    "inversion": -np.eye(3, dtype=float),
-    "c3_111":    np.array([[0, 0, 1], [1, 0, 0], [0, 1, 0]], dtype=float),
-    "swap_xy":   np.array([[0, 1, 0], [1, 0, 0], [0, 0, 1]], dtype=float),
+# R_inv acts on FRACTIONAL coordinates: r_src = R_inv @ (r - c) + c
+#
+# Operations are written as CARTESIAN matrices S (acting on Cartesian xyz) and then
+# converted to the fractional frame in which they are applied:
+#     R_inv = inv(Lᵀ) @ S @ Lᵀ        (L rows = lattice vectors a_i)
+# For a non-orthogonal cell, permuting fractional axes is NOT the same Cartesian
+# operation, so this conversion is essential.  (Bug fixed: previously S was applied
+# directly to fractional coords, so on this FCC lattice "swap_xy" was physically a
+# y<->z mirror, not x<->y.)  A crystal symmetry maps the lattice onto itself, so
+# R_inv must come out integer — we assert that.
+from ws_cell import read_poscar_structure
+
+_latvec = read_poscar_structure(
+    Path(__file__).resolve().parent / "Data" / MATERIAL / "POSCAR")[0]   # (3,3) rows a_i
+
+R_CART = {
+    "inversion": -np.eye(3, dtype=float),                                   # r -> -r about center
+    "c3_111":    np.array([[0, 1, 0], [0, 0, 1], [1, 0, 0]], dtype=float),  # 120° about [111]
+    "swap_xy":   np.array([[0, 1, 0], [1, 0, 0], [0, 0, 1]], dtype=float),  # Cartesian x<->y mirror
 }
-R_inv = R_INV[operation]
+_S_cart = R_CART[operation]
+_R_frac = np.linalg.inv(_latvec.T) @ _S_cart @ _latvec.T
+R_inv = np.round(_R_frac)
+if not np.allclose(_R_frac, R_inv, atol=1e-6):
+    raise ValueError(
+        f"Operation '{operation}' is not a symmetry of this lattice; "
+        f"its fractional matrix is not integer:\n{_R_frac}")
+print(f"Operation '{operation}': Cartesian S ->\n{_S_cart.astype(int)}")
+print(f"applied as fractional R_inv ->\n{R_inv.astype(int)}")
 
 # ── supercell embedding ────────────────────────────────────────────────────────
 # Embed WS data into a 3x supercell so r_src values near the WS boundary
@@ -133,84 +152,103 @@ def interp_R_phi(phi_col):
     return np.where(safe, (num_real + 1j * num_imag) / np.where(safe, den, 1.0), 0.0)
 
 
-# ── symmetry matrix D_ij = <phi_i | R | phi_j> ────────────────────────────────
-n = len(indices)
-D = np.zeros((n, n), dtype=complex)
-R_phi_cache = {}
-for b, jb in enumerate(indices):
-    R_phi_b = interp_R_phi(cno_orbs[:, jb])
-    R_phi_cache[jb] = R_phi_b
-    for a, ja in enumerate(indices):
-        D[a, b] = cno_orbs[:, ja].conj() @ R_phi_b
+# ── flat list of all adapted indices ──────────────────────────────────────────
+all_adapted_flat = [i for grp in index_groups for i in grp]
+all_adapted_set  = set(all_adapted_flat)
 
-# ── diagnostics ────────────────────────────────────────────────────────────────
+# ── per-group D-matrix, diagonalisation, and CNO rotation ─────────────────────
 np.set_printoptions(precision=6, suppress=True, linewidth=100)
-print(f"CNO indices  : {indices}")
 print(f"Operation    : {operation}   center = {center}")
-for idx in indices:
-    print(f"  CNO {idx}  occ = {cno_occ[idx]:.6f}")
-eta, U = np.linalg.eig(D)
-order = np.argsort(-eta.real)
-eta, U = eta[order], U[:, order]
 
-# ── rotate CNOs: phi_new_a = sum_j phi_j * U[j, a] ───────────────────────────
-phi_new = cno_orbs[:, indices] @ U
-phi_new /= np.sqrt(np.sum(np.abs(phi_new) ** 2, axis=0))
+cno_out      = cno_orbs.copy()
+_grp_D       = []   # D matrix per group
+_grp_eta     = []   # eigenvalues per group
+_grp_n       = []   # group size per group
+_grp_basis   = []   # original phi basis per group
+_grp_Rcache  = {}   # orbital index -> R_phi, accumulated across groups
 
-cno_out = cno_orbs.copy()
-for a, idx in enumerate(indices):
-    cno_out[:, idx] = phi_new[:, a]
+for indices in index_groups:
+    n = len(indices)
+    D = np.zeros((n, n), dtype=complex)
+    for b, jb in enumerate(indices):
+        R_phi_b = interp_R_phi(cno_orbs[:, jb])
+        _grp_Rcache[jb] = R_phi_b
+        for a, ja in enumerate(indices):
+            D[a, b] = cno_orbs[:, ja].conj() @ R_phi_b
+
+    print(f"\nCNO indices  : {indices}")
+    for idx in indices:
+        print(f"  CNO {idx}  occ = {cno_occ[idx]:.6f}")
+    eta, U = np.linalg.eig(D)
+    order = np.argsort(-eta.real)
+    eta, U = eta[order], U[:, order]
+
+    phi_new = cno_orbs[:, indices] @ U
+    phi_new /= np.sqrt(np.sum(np.abs(phi_new) ** 2, axis=0))
+    for a, idx in enumerate(indices):
+        cno_out[:, idx] = phi_new[:, a]
+
+    _grp_D.append(D)
+    _grp_eta.append(eta)
+    _grp_n.append(n)
+    _grp_basis.append(cno_orbs[:, indices])
 
 out_path = output_dir / out_name
 np.save(out_path, cno_out)
 print(f"\nSaved -> {out_path}")
-print(f"  Modified CNOs : {indices}   (all others unchanged)")
+print(f"  Modified CNOs : {all_adapted_flat}   (all others unchanged)")
 
 # ── verification (informational; written to metadata) ─────────────────────────
 import io as _io
 _v = _io.StringIO()
 _v.write("\n=== symmetry_adapt_cnos (interpolation mode) ===\n")
 _v.write(f"operation     : {operation}   center = {center}\n")
-_v.write(f"indices       : {indices}\n")
-_unitary_error = np.linalg.norm(D.conj().T @ D - np.eye(n))
-_v.write(f"\nD:\n{D}\nD^HD:\n{D.conj().T @ D}\n")
-_v.write(f"norm(D^HD - I) : {_unitary_error:.4e}\n")
-_v.write(f"eigenvalues    : {eta}\n")
-_v.write(f"|eigenvalues|   : {np.abs(eta)}\n")
+_v.write(f"index_groups  : {index_groups}\n")
 
-_v.write("\nLeakage of R|phi_j> outside selected subspace:\n")
-_phi_basis = cno_orbs[:, indices]
 _max_weight_leakage = 0.0
-for _, _jb in enumerate(indices):
-    _R_phi        = R_phi_cache[_jb]
-    _proj_coeffs  = _phi_basis.conj().T @ _R_phi
-    _total_w      = float(np.real(_R_phi.conj() @ _R_phi))
-    _inside_w     = float(np.real(_proj_coeffs.conj() @ _proj_coeffs))
-    _weight_leak  = 1.0 - _inside_w / _total_w
-    _residual_norm = np.sqrt(max(_weight_leak, 0.0))
-    _max_weight_leakage = max(_max_weight_leakage, _weight_leak)
-    _warn = "  <-- consider expanding indices" if _weight_leak > weight_leakage_warn_tol else ""
-    _v.write(f"  CNO {_jb}:"
-             f"  inside_weight={_inside_w / _total_w:.6f}"
-             f"  weight_leakage={_weight_leak:.4e}"
-             f"  residual_norm=sqrt(weight_leakage)={_residual_norm:.4e}"
-             + _warn + "\n")
+_unitary_error_max  = 0.0
 
-_v.write("\nDensity symmetry  ||R(rho) - rho|| / ||rho||:\n")
-for _a, _idx in enumerate(indices):
-    _rho   = np.abs(cno_out[:, _idx]) ** 2
-    _R_rho = interp_R_phi(_rho.astype(complex)).real
-    _err   = np.linalg.norm(_R_rho - _rho) / np.linalg.norm(_rho)
-    _warn  = "  <-- not symmetric" if _err > density_residual_warn_tol else ""
-    _v.write(f"  CNO {_idx}: {_err:.4e}" + _warn + "\n")
+for indices, D, eta, n, _phi_basis in zip(index_groups, _grp_D, _grp_eta, _grp_n, _grp_basis):
+    _unitary_error = np.linalg.norm(D.conj().T @ D - np.eye(n))
+    _unitary_error_max = max(_unitary_error_max, _unitary_error)
 
-_v.write("\nEigenstate residual  ||R(phi) - eta*phi|| / ||phi||:\n")
-for _a, _idx in enumerate(indices):
-    _phi       = cno_out[:, _idx]
-    _R_phi_out = interp_R_phi(_phi)
-    _res       = np.linalg.norm(_R_phi_out - eta[_a] * _phi) / np.linalg.norm(_phi)
-    _warn      = "  <-- not clean eigenstate" if _res > eigenstate_residual_warn_tol else ""
-    _v.write(f"  CNO {_idx}  eta={eta[_a]:.4f}: {_res:.4e}" + _warn + "\n")
+    _v.write(f"\n--- indices {indices} ---\n")
+    _v.write(f"D:\n{D}\nD^HD:\n{D.conj().T @ D}\n")
+    _v.write(f"norm(D^HD - I) : {_unitary_error:.4e}\n")
+    _v.write(f"eigenvalues    : {eta}\n")
+    _v.write(f"|eigenvalues|   : {np.abs(eta)}\n")
+
+    _v.write("\nLeakage of R|phi_j> outside selected subspace:\n")
+    for _jb in indices:
+        _R_phi        = _grp_Rcache[_jb]
+        _proj_coeffs  = _phi_basis.conj().T @ _R_phi
+        _total_w      = float(np.real(_R_phi.conj() @ _R_phi))
+        _inside_w     = float(np.real(_proj_coeffs.conj() @ _proj_coeffs))
+        _weight_leak  = 1.0 - _inside_w / _total_w
+        _residual_norm = np.sqrt(max(_weight_leak, 0.0))
+        _max_weight_leakage = max(_max_weight_leakage, _weight_leak)
+        _warn = "  <-- consider expanding indices" if _weight_leak > weight_leakage_warn_tol else ""
+        _v.write(f"  CNO {_jb}:"
+                 f"  inside_weight={_inside_w / _total_w:.6f}"
+                 f"  weight_leakage={_weight_leak:.4e}"
+                 f"  residual_norm=sqrt(weight_leakage)={_residual_norm:.4e}"
+                 + _warn + "\n")
+
+    _v.write("\nDensity symmetry  ||R(rho) - rho|| / ||rho||:\n")
+    for _a, _idx in enumerate(indices):
+        _rho   = np.abs(cno_out[:, _idx]) ** 2
+        _R_rho = interp_R_phi(_rho.astype(complex)).real
+        _err   = np.linalg.norm(_R_rho - _rho) / np.linalg.norm(_rho)
+        _warn  = "  <-- not symmetric" if _err > density_residual_warn_tol else ""
+        _v.write(f"  CNO {_idx}: {_err:.4e}" + _warn + "\n")
+
+    _v.write("\nEigenstate residual  ||R(phi) - eta*phi|| / ||phi||:\n")
+    for _a, _idx in enumerate(indices):
+        _phi       = cno_out[:, _idx]
+        _R_phi_out = interp_R_phi(_phi)
+        _res       = np.linalg.norm(_R_phi_out - eta[_a] * _phi) / np.linalg.norm(_phi)
+        _warn      = "  <-- not clean eigenstate" if _res > eigenstate_residual_warn_tol else ""
+        _v.write(f"  CNO {_idx}  eta={eta[_a]:.4f}: {_res:.4e}" + _warn + "\n")
 
 # Group-based R-invariance check for all CNOs above check_occ_cutoff.
 # Degenerate groups identified by gaps in occupation (gap > 0.01 = new group).
@@ -230,9 +268,10 @@ _max_singleton_dev   = 0.0
 _min_singleton_overlap = 1.0
 for _grp in _groups:
     _occ_str = ", ".join(f"{cno_occ[i]:.4f}" for i in _grp)
-    _tag = "  [selected -- see above]" if set(_grp) == set(indices) else ""
+    _is_adapted = any(set(_grp) == set(grp) for grp in index_groups)
+    _tag = "  [selected -- see above]" if _is_adapted else ""
     _v.write(f"  group {_grp}  occ=[{_occ_str}]{_tag}\n")
-    if set(_grp) == set(indices):
+    if _is_adapted:
         continue
     if len(_grp) == 1:
         _i       = _grp[0]
@@ -276,9 +315,9 @@ for _grp in _groups:
                  + _warn + "\n")
 
 # ── final summary ──────────────────────────────────────────────────────────────
-if _max_weight_leakage < 0.01 and _unitary_error < 0.03:
+if _max_weight_leakage < 0.01 and _unitary_error_max < 0.03:
     _result = "PASS"
-elif _max_weight_leakage < weight_leakage_warn_tol and _unitary_error < group_unitarity_warn_tol:
+elif _max_weight_leakage < weight_leakage_warn_tol and _unitary_error_max < group_unitarity_warn_tol:
     _result = "PASS WITH SMALL INTERPOLATION ERROR"
 else:
     _result = "WARNING"
@@ -286,17 +325,17 @@ else:
 _v.write("\nSymmetry diagnostic summary:\n")
 _v.write(f"  selected-subspace maximum weight leakage   : {_max_weight_leakage:.4e}\n")
 _v.write(f"  maximum singleton overlap deviation from 1 : {_max_singleton_dev:.4e}\n")
-_v.write(f"  D-matrix unitarity error                   : {_unitary_error:.4e}\n")
+_v.write(f"  D-matrix unitarity error (max across groups): {_unitary_error_max:.4e}\n")
 _v.write(f"  result: {_result}\n")
 
 _ver_text = _v.getvalue()
 print(f"Diagnostic result: {_result}"
       f"  (weight_leakage={_max_weight_leakage:.4e}"
-      f"  unitarity_err={_unitary_error:.4e})")
+      f"  unitarity_err={_unitary_error_max:.4e})")
 
 if _max_weight_leakage > weight_leakage_warn_tol:
     print(f"WARNING: subspace weight leakage {_max_weight_leakage:.4e} > {weight_leakage_warn_tol}"
-          f" -- try expanding indices (e.g. {list(range(indices[0], indices[-1] + 3))})")
+          f" -- try expanding one or more index groups")
 if _min_singleton_overlap < singleton_overlap_warn_tol:
     print(f"WARNING: singleton |<phi|R phi>| = {_min_singleton_overlap:.6f}"
           f" < {singleton_overlap_warn_tol} -- possible symmetry/interpolation issue")
