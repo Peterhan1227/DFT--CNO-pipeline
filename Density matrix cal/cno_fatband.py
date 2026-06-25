@@ -36,7 +36,7 @@ linewidth = 2.5
 interpolate_for_plot      = False
 interp_points_per_segment = 3
 
-# ── 3D CNO snapshot (optional; requires the standalone CNO-Visualizer package) ──
+# ──3D CNO snapshot (optional; requires the standalone CNO-Visualizer package) ──
 # When on, each plotted CNO also gets a rotating 3D density-isosurface GIF saved
 # next to its fatband PNG — a VESTA-like view (no phase) for reports.  The GIF is
 # rendered from the SAME cnos_sym_adapted vector being plotted, so it always
