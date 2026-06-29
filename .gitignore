@@ -7,3 +7,6 @@ VaspBandUnfolding/
 # VASP large binary files
 WAVECAR
 WAVECAR_lm
+
+# IrRep outputs
+Irrep/output/

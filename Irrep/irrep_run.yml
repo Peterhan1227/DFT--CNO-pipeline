@@ -1,0 +1,20 @@
+code: vasp
+
+fpos: POSCAR
+fwav: WAVECAR_t
+
+ecut: 300
+
+ibstart: 1
+ibend: 8
+
+kpoints: "1,2,3,4"
+kpnames: "GM,L,W,X"
+
+searchcell: true
+
+ef: auto
+degenthresh: 0.0007
+
+json_file: output/test_si_irrep.json
+v: 1

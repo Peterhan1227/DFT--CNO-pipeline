@@ -1,0 +1,11 @@
+code: vasp
+fpos: POSCAR
+
+onlysym: true
+searchcell: true
+print_hs_kpoints: true
+
+json_file: output/irrep_structure.json
+v: 1
+
+#irrep -config high_symmetry.yml > output/high_symmetry_points.out

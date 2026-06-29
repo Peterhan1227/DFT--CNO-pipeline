@@ -1,0 +1,13 @@
+﻿--- a/irrep/spacegroup_irreps.py
++++ b/irrep/spacegroup_irreps.py
+@@ -314,8 +314,8 @@ class SpaceGroupIrreps(SpaceGroup):
+                 tab[irr.name] = {}
+                 for i, (sym1, sym2) in enumerate(zip(self.symmetries, table.symmetries)):
+                     try:
+                         dt = sym2.t - sym1.translation_refUC(self.refUC, self.shiftUC)
+-                        tab[irr.name][i + 1] = irr.characters[i + 1] * \
+-                            sym1.sign * np.exp(2j * np.pi * dt.dot(irr.k))
++                        tab[irr.name][i + 1] = irr.characters[i + 1].conj() * \
++                            sym1.sign * np.exp(-2j * np.pi * dt.dot(irr.k))
+                     except KeyError:
+                         pass

@@ -1,0 +1,31 @@
+# Configuration for extract_symmetry_matrices.py - Diamond Si (SG 227)
+# Run from the Irrep/ directory:
+#   python scripts/extract_symmetry_matrices.py symm_config.yml
+
+poscar:  POSCAR
+wavecar: WAVECAR_t
+ecut:    300.0
+ibstart: 1     # 1-based; band 1 = lowest valence band loaded
+ibend:   8     # 1-based inclusive; loads 8 bands total
+
+kpoints: [1, 2, 3, 4]           # 1-based indices into the VASP KPOINTS file
+kpnames: [GM, L, W, X]
+
+degen_thresh: 7.0e-4   # energy window (eV) for grouping degenerate bands
+ef: "0"
+
+basis:
+  mode: diagonalize        # raw | diagonalize
+  primary_symop: auto      # auto = most-resolving non-identity op; or 1-based BCS int
+  eigenvalue_atol: 1.0e-3  # tolerance for degenerate eigenvalue clusters
+
+occupied_bands: 4   # assemble block-diagonal matrices for bands 1..4
+
+output:
+  npz:    output/symmetry_matrices.npz
+  json:   output/symmetry_matrices.json
+  report: output/symmetry_matrices_report.txt
+
+validation:
+  unitary_atol: 1.0e-5
+  trace_atol:   2.0e-3   # DFT traces have ~1e-3 numerical noise at higher bands
