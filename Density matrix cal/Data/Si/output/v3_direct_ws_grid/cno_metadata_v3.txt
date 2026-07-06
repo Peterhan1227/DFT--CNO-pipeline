@@ -1,0 +1,36 @@
+=== main_v3.py metadata ===
+
+method                  : direct Fourier sum on new WS-cell grid
+material                : Si
+ispin                   : 1
+restrict_to_fermi_window: True
+efermi                  : 5.9837 eV
+fermi_window_ev         : 5.0 eV
+fft_grid_ref            : (13,13,13)  Nr=2197
+volume_Ang3             : 40.329527
+ws_center               : [0.875, 0.875, 0.875]  (fractional)
+ws_center_cart          : [-4.76324, -4.76324, -4.76324]
+
+--- normalization convention ---
+physical_norm_factor    : 1/sqrt(Omega) = 1.574666e-01
+volume_weight           : w_i = dV (Cartesian voxel volume)
+psi_weighted            : psi_tilde = psi * sqrt(w_i)
+combined_norm_factor    : sqrt(dV/Omega)
+target_norm_sum         : sum_j |psi_tilde_j|^2 -> 1  (converges as dV->0)
+density_matrix          : rho[r,r'] = sum_nk wk * occ * psi_tilde(r) * psi_tilde*(r')
+expected_trace          : Tr(rho) ¡Ö n_occ (per spin)
+
+--- comparison with main.py convention ---
+main.py norm_factor     : 1/sqrt(Nr)  (discrete, exact Parseval on FFT grid)
+main.py sum_j |psi|^2   : = 1 exactly
+v3 sum_j |psi_tilde|^2  : ¡Ö 1 (converges, not exact for finite grid)
+both: Tr(rho)           : ¡Ö n_occ
+
+--- wavefunction evaluation ---
+mode                    : psi (full Bloch: exp(2pi i (G+k).s_frac))
+s_frac                  : NOT reduced mod 1
+no_folding              : WS positions evaluated directly
+no_translation_phases   : (k+G).s already includes correct Bloch phase
+
+--- total runtime ---
+total_runtime_s         : 370.23

@@ -1,0 +1,78 @@
+=== main_v2.py metadata ===
+
+method                  : direct Fourier sum on FFT grid
+material                : Si
+LSORBIT                 : False
+ispin                   : 1
+restrict_to_fermi_window: True
+efermi                  : 5.9837 eV
+fermi_window_ev         : 5.0 eV
+fft_grid                : (13, 13, 13)
+nr_total                : 2197
+volume_Ang3             : 40.329527
+nkpts                   : 3375
+nbands                  : 8
+chunk_size              : 4096
+
+--- normalization ---
+mode                    : psi (full Bloch wavefunction)
+norm_factor             : 1/sqrt(Nr) = 2.133462e-02
+convention              : psi_nk(r) = (1/sqrt(Nr)) * sum_G C_G * exp(2pi i (G+k).r_frac)
+sum_j |psi_j|^2         : = 1 (exactly, by Parseval on FFT grid)
+
+--- wavefunction reconstruction ---
+method                  : explicit Fourier sum (no ifftn in production)
+fft_used_for            : diagnostic comparison only
+original_uses           : u_nk (cell-periodic) then Bloch phase
+v2_uses                 : full psi_nk directly at r_for_phase
+equivalence             : exact (G.n = integer -> exp(2pi i G.n) = 1)
+
+--- WS cell ---
+USE_WS_CELL             : True
+ws_center_input         : [0.875, 0.875, 0.875]  (fractional)
+ws_center_frac_wrapped  : [0.875, 0.875, 0.875]
+ws_translation_nmax     : 3
+
+--- diagnostic FFT vs direct ---
+ik=1  k=[1.262379e-15, 1.262379e-15, 1.262379e-15]  Gamma=True
+  max|жд|=9.739e-17  rms=2.234e-17  rel_fro=1.047e-15  phase_aligned_max=1.007e-16
+  norms_FFT=['1.000000', '1.000000', '1.000000']
+  norms_direct=['1.000000', '1.000000', '1.000000']
+ik=2  k=[0.06666667, 1.262729e-15, 1.262729e-15]  Gamma=False
+  max|жд|=1.097e-16  rms=2.274e-17  rel_fro=1.066e-15  phase_aligned_max=1.059e-16
+  norms_FFT=['1.000000', '1.000000', '1.000000']
+  norms_direct=['1.000000', '1.000000', '1.000000']
+
+--- density matrix ---
+rho_hermiticity_error   : 8.6748e-19
+Tr(rho)                 : 4.91703704
+sample_psi_norms_ik1    : ['1.000000', '1.000000', '1.000000']
+
+--- CNO spectrum ---
+sum_cno_occ             : 4.9170370370
+n_eigenvalues_gt_1e-6   : 108
+top_20_cno_occupations  :
+  CNO   0 : 6.6116637757e-01
+  CNO   1 : 6.6087695028e-01
+  CNO   2 : 5.6670077791e-01
+  CNO   3 : 4.3809563988e-01
+  CNO   4 : 4.3781155193e-01
+  CNO   5 : 4.1970314541e-01
+  CNO   6 : 2.4206111516e-01
+  CNO   7 : 2.3193436544e-01
+  CNO   8 : 2.3090848641e-01
+  CNO   9 : 1.9618722019e-01
+  CNO  10 : 1.3549087141e-01
+  CNO  11 : 1.3521165883e-01
+  CNO  12 : 1.1816450378e-01
+  CNO  13 : 1.1794790739e-01
+  CNO  14 : 3.9574234674e-02
+  CNO  15 : 3.4210787033e-02
+  CNO  16 : 2.6872208381e-02
+  CNO  17 : 2.4654339000e-02
+  CNO  18 : 2.4525723702e-02
+  CNO  19 : 2.3846094739e-02
+
+--- performance ---
+density_matrix_loop_s   : 272.36
+total_runtime_s         : 277.75

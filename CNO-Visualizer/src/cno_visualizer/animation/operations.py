@@ -9,6 +9,7 @@ center fixed.
 
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass
 from typing import Optional, Sequence, Union
@@ -117,4 +118,77 @@ def rotation_matrix_4x4(axis_unit: np.ndarray, angle_rad: float, center: np.ndar
     return M
 
 
-__all__ = ["RotationOp", "axis_to_cartesian", "make_rotation", "rotation_matrix_4x4"]
+@dataclass(frozen=True)
+class ScrewOp:
+    """A screw rotation: a proper rotation about ``axis`` (through ``center``) plus an
+    intrinsic translation *along that same axis*.  Because the translation is parallel
+    to the rotation axis, rotation and translation commute, so applying the operation
+    ``t`` times (``t`` need not be an integer, for smooth animation) is simply "rotate
+    by ``t * angle_deg`` and translate by ``t * translation``" about the fixed ``center``
+    — no compounding/step-accumulation error.
+
+    ``n_fold`` applications return the lattice to a pure translation along the axis
+    (a symmetry of the infinite crystal); e.g. a 4_1 screw axis needs 4 applications.
+    """
+
+    label: str
+    axis: np.ndarray          # unit Cartesian vector, the screw axis direction
+    angle_deg: float          # rotation per application
+    translation: np.ndarray  # Cartesian translation per application (parallel to axis)
+    center: np.ndarray       # any point on the screw axis (Cartesian)
+
+
+@dataclass(frozen=True)
+class GlideOp:
+    """A glide reflection: a mirror across the plane through ``center`` with normal
+    ``normal``, plus an intrinsic in-plane translation.
+
+    A reflection has determinant -1 and is not continuously connected to the identity
+    through rigid rotations, so it is animated as a "flip through the plane": the
+    component of every point along ``normal`` is scaled by ``cos(pi * t)`` (``+1`` at
+    ``t=0`` -> ``0`` at ``t=0.5`` (flattened into the plane) -> ``-1`` at ``t=1`` (the
+    exact mirror image)), while the in-plane glide translation grows linearly with
+    ``t``.  Two applications (``t: 0 -> 2``) return the lattice to a pure in-plane
+    translation (a symmetry of the infinite crystal).
+    """
+
+    label: str
+    normal: np.ndarray        # unit Cartesian vector, mirror-plane normal
+    translation: np.ndarray  # Cartesian in-plane glide vector per application
+    center: np.ndarray        # any point on the mirror plane (Cartesian)
+
+
+def screw_matrix_4x4(
+    axis_unit: np.ndarray, angle_rad: float, translation: np.ndarray, center: np.ndarray
+) -> np.ndarray:
+    """4x4 matrix: rotate by ``angle_rad`` about ``axis_unit`` through ``center``, then
+    add ``translation`` (parallel to the axis, so order does not matter)."""
+    M = rotation_matrix_4x4(axis_unit, angle_rad, center)
+    M[:3, 3] += np.asarray(translation, dtype=np.float64).reshape(3)
+    return M
+
+
+def glide_matrix_4x4(
+    normal_unit: np.ndarray, t: float, translation: np.ndarray, center: np.ndarray
+) -> np.ndarray:
+    """4x4 matrix for the glide "flip" at progress ``t`` (see :class:`GlideOp`)."""
+    n = np.asarray(normal_unit, dtype=np.float64).reshape(3)
+    c = np.asarray(center, dtype=np.float64).reshape(3)
+    scale = math.cos(math.pi * float(t))
+    R = np.eye(3, dtype=np.float64) - (1.0 - scale) * np.outer(n, n)
+    M = np.eye(4, dtype=np.float64)
+    M[:3, :3] = R
+    M[:3, 3] = c - R @ c + np.asarray(translation, dtype=np.float64).reshape(3) * float(t)
+    return M
+
+
+__all__ = [
+    "RotationOp",
+    "ScrewOp",
+    "GlideOp",
+    "axis_to_cartesian",
+    "make_rotation",
+    "rotation_matrix_4x4",
+    "screw_matrix_4x4",
+    "glide_matrix_4x4",
+]

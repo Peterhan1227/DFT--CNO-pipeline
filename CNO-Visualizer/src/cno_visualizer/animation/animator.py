@@ -12,18 +12,27 @@ from __future__ import annotations
 import math
 import time
 from dataclasses import dataclass, field
-from typing import Callable, Dict, List, Optional, Sequence
+from typing import Callable, Dict, List, Optional, Sequence, Union
 
 import numpy as np
 
 from cno_visualizer.animation.builder import apply_render_quality, build_scene
 from cno_visualizer.animation.easing import smootherstep
-from cno_visualizer.animation.operations import RotationOp, rotation_matrix_4x4
+from cno_visualizer.animation.operations import (
+    GlideOp,
+    RotationOp,
+    ScrewOp,
+    glide_matrix_4x4,
+    rotation_matrix_4x4,
+    screw_matrix_4x4,
+)
+
+AnyOp = Union[RotationOp, ScrewOp, GlideOp]
 
 
 @dataclass
 class AnimationSpec:
-    op: RotationOp
+    op: AnyOp
     duration: float = 4.0                       # seconds per symmetry step
     fps: int = 30
     easing: Callable[[float], float] = field(default=smootherstep)
@@ -32,6 +41,11 @@ class AnimationSpec:
     hold_end: float = 1.0                        # static seconds at the end
     n_steps: int = 1                             # apply the op this many times
     camera_orbit_deg: float = 0.0                # optional cinematic camera drift
+
+
+def _camera_axis(op: AnyOp) -> np.ndarray:
+    """The vector to frame the camera around: rotation/screw axis, or glide-plane normal."""
+    return op.normal if isinstance(op, GlideOp) else op.axis
 
 
 def _set_user_matrix(actor, M: np.ndarray) -> None:
@@ -131,8 +145,39 @@ class SymmetryAnimator:
         self.plotter.reset_camera()                    # fit distance, keep direction
         self.plotter.camera.zoom(1.1)
 
-    def _apply_angle(self, angle_rad: float) -> None:
-        M = rotation_matrix_4x4(self._op_axis, angle_rad, self._op_center)
+    def _setup_op(self, op: AnyOp) -> None:
+        """Cache the operation's fixed geometry (axis/normal/center/translation).
+
+        ``total_progress`` (how many whole applications, possibly fractional) is the
+        only thing that varies frame-to-frame; every op type maps it to a 4x4 matrix
+        directly (no per-step compounding), so intermediate rounding never accumulates.
+        """
+        self._op = op
+        self._op_center = np.asarray(op.center, dtype=np.float64)
+        if isinstance(op, GlideOp):
+            self._op_normal = np.asarray(op.normal, dtype=np.float64)
+            self._op_translation = np.asarray(op.translation, dtype=np.float64)
+        else:
+            self._op_axis = np.asarray(op.axis, dtype=np.float64)
+            self._op_translation = np.asarray(
+                getattr(op, "translation", np.zeros(3)), dtype=np.float64
+            )
+
+    def _matrix_for_progress(self, total_progress: float) -> np.ndarray:
+        op = self._op
+        if isinstance(op, GlideOp):
+            return glide_matrix_4x4(
+                self._op_normal, total_progress, self._op_translation, self._op_center
+            )
+        angle = math.radians(op.angle_deg) * total_progress
+        if isinstance(op, ScrewOp):
+            return screw_matrix_4x4(
+                self._op_axis, angle, self._op_translation * total_progress, self._op_center
+            )
+        return rotation_matrix_4x4(self._op_axis, angle, self._op_center)
+
+    def _apply_progress(self, total_progress: float) -> None:
+        M = self._matrix_for_progress(total_progress)
         for name in self._animated:
             actor = self._actors.get(name) if self._actors else None
             if actor is not None:
@@ -152,9 +197,8 @@ class SymmetryAnimator:
     # ------------------------------------------------------------------ render
     def render(self, spec: AnimationSpec, output: str = "symmetry.mp4") -> str:
         if self._actors is None:
-            self.build(axis=spec.op.axis)
-        self._op_axis = np.asarray(spec.op.axis, dtype=np.float64)
-        self._op_center = np.asarray(spec.op.center, dtype=np.float64)
+            self.build(axis=_camera_axis(spec.op))
+        self._setup_op(spec.op)
 
         pl = self.plotter
         out = str(output)
@@ -183,18 +227,15 @@ class SymmetryAnimator:
                     pass
             pl.write_frame()
 
-        step_angle = math.radians(spec.op.angle_deg)
-        self._apply_angle(0.0)
+        self._apply_progress(0.0)
         for _ in range(hs):
             emit()
 
-        accum = 0.0
-        for _ in range(n_steps):
+        for step in range(n_steps):
             for f in range(1, nf + 1):
-                self._apply_angle(accum + step_angle * spec.easing(f / nf))
+                self._apply_progress(step + spec.easing(f / nf))
                 emit()
-            accum += step_angle
-            self._apply_angle(accum)
+            self._apply_progress(step + 1)
             for _ in range(hstep):
                 emit()
 
@@ -208,21 +249,17 @@ class SymmetryAnimator:
     def play(self, spec: AnimationSpec) -> None:  # pragma: no cover - interactive
         """Best-effort interactive playback (on-screen only)."""
         if self._actors is None:
-            self.build(axis=spec.op.axis)
-        self._op_axis = np.asarray(spec.op.axis, dtype=np.float64)
-        self._op_center = np.asarray(spec.op.center, dtype=np.float64)
+            self.build(axis=_camera_axis(spec.op))
+        self._setup_op(spec.op)
         pl = self.plotter
         self._title(spec.op.label)
         pl.show(interactive_update=True, auto_close=False)
         nf = max(1, int(round(spec.duration * spec.fps)))
-        step_angle = math.radians(spec.op.angle_deg)
-        accum = 0.0
-        for _ in range(max(1, int(spec.n_steps))):
+        for step in range(max(1, int(spec.n_steps))):
             for f in range(1, nf + 1):
-                self._apply_angle(accum + step_angle * spec.easing(f / nf))
+                self._apply_progress(step + spec.easing(f / nf))
                 pl.update()
                 time.sleep(1.0 / spec.fps)
-            accum += step_angle
         pl.show()
 
 
