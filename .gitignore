@@ -7,6 +7,13 @@ VaspBandUnfolding/
 # VASP large binary files
 WAVECAR
 WAVECAR_lm
+WAVECAR_dos
+
+# VASP input files (POTCAR is licensed pseudopotential data -- never redistribute)
+POTCAR
+POSCAR*
+KPOINTS
+EIGENVAL*
 
 # IrRep outputs
 Irrep/output/

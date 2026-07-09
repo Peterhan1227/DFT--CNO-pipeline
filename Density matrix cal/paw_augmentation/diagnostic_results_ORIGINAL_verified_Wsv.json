@@ -1,0 +1,33 @@
+{
+  "_provenance": "Captured verbatim from the first diagnostics.py run against Data/WSe2_mono/WAVECAR + POTCAR (both W_sv, matching pair) EARLY in this task's session, before that WAVECAR was overwritten mid-task by a separate concurrent calculation (confirmed by user to be a plain-W-pseudopotential run). This file reconstructs those console-captured numbers because the underlying WAVECAR bytes are gone (overwritten, not git-tracked) and cannot be regenerated. Raw plane-wave norms from the same run matched TASK_BRIEF.md's own quoted investigation table exactly (band 2: 0.449, band 3: 0.439, band 4: 0.439, etc.), confirming this is the same dataset the brief's bug investigation was based on.",
+  "wse2": [
+    {"ik": 1,   "nbands": 13, "offdiag_baseline": 1.5687e-01, "offdiag_corrected": 5.3966e-06, "diag_min": 1.0000, "diag_max": 1.0000},
+    {"ik": 2,   "nbands": 13, "offdiag_baseline": 1.5530e-01, "offdiag_corrected": 2.8355e-06, "diag_min": 1.0000, "diag_max": 1.0000},
+    {"ik": 50,  "nbands": 13, "offdiag_baseline": 1.7118e-01, "offdiag_corrected": 7.0424e-07, "diag_min": 1.0000, "diag_max": 1.0000},
+    {"ik": 150, "nbands": 13, "offdiag_baseline": 1.8405e-01, "offdiag_corrected": 9.3198e-07, "diag_min": 1.0000, "diag_max": 1.0000},
+    {"ik": 300, "nbands": 13, "offdiag_baseline": 1.3608e-01, "offdiag_corrected": 7.0959e-07, "diag_min": 1.0000, "diag_max": 1.0000}
+  ],
+  "si": [
+    {"ik": 1,   "nbands": 4, "offdiag_baseline": 1.4067e-08},
+    {"ik": 2,   "nbands": 4, "offdiag_baseline": 3.3140e-03},
+    {"ik": 50,  "nbands": 4, "offdiag_baseline": 1.4853e-02},
+    {"ik": 150, "nbands": 4, "offdiag_baseline": 1.9264e-02},
+    {"ik": 300, "nbands": 4, "offdiag_baseline": 1.6360e-02}
+  ],
+  "raw_norms_ik1_sanity_check": {
+    "note": "readBandCoeff(norm=False) raw ||psi~||^2 per occupied band at ik=1, matches TASK_BRIEF.md's own table exactly",
+    "band_1":  {"E_eV": -76.38, "raw_norm2": 0.956},
+    "band_2":  {"E_eV": -40.61, "raw_norm2": 0.449},
+    "band_3":  {"E_eV": -40.51, "raw_norm2": 0.439},
+    "band_4":  {"E_eV": -40.51, "raw_norm2": 0.439},
+    "band_5":  {"E_eV": -17.12, "raw_norm2": 1.281},
+    "band_6":  {"E_eV": -15.82, "raw_norm2": 1.330},
+    "band_7":  {"E_eV": -8.53,  "raw_norm2": 1.047},
+    "band_8":  {"E_eV": -4.79,  "raw_norm2": 0.926},
+    "band_9":  {"E_eV": -4.79,  "raw_norm2": 0.926},
+    "band_10": {"E_eV": -4.46,  "raw_norm2": 1.064},
+    "band_11": {"E_eV": -3.66,  "raw_norm2": 0.937},
+    "band_12": {"E_eV": -3.66,  "raw_norm2": 0.937},
+    "band_13": {"E_eV": -2.64,  "raw_norm2": 0.887}
+  }
+}

@@ -637,6 +637,13 @@ interpolation_coverage = _obj_array([op_results[g]['coverage'] for g in range(Ng
 candidate_block_diagnostics = _obj_array([block_diag[tuple(b)] for b in candidate_blocks])
 
 np.savez(OUTPUT_DIR / f"site_symmetry_{tag}.npz",
+    material      = MATERIAL,
+    spacegroup_label = sg_label,
+    symprec       = SYMPREC,
+    latvec        = latvec,
+    q             = q,
+    q_wrap        = q_wrap,
+    q_cart        = center_cart,
     R_ops         = np.array([op['R']     for op in site_ops]),
     t_ops         = np.array([op['t']     for op in site_ops]),
     T_ops         = np.array([op['T']     for op in site_ops]),

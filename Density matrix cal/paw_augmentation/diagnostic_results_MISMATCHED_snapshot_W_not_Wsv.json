@@ -1,0 +1,76 @@
+{
+  "wse2": [
+    {
+      "ik": 1,
+      "nbands": 9,
+      "offdiag_baseline": 0.09266704625825709,
+      "offdiag_corrected": 0.0047715375377743825,
+      "diag_min": 0.9949787655592195,
+      "diag_max": 1.0025194583145054,
+      "diag_mean_abs_dev": 0.002605633387367091
+    },
+    {
+      "ik": 2,
+      "nbands": 9,
+      "offdiag_baseline": 0.09252628167888244,
+      "offdiag_corrected": 0.0037920016697488086,
+      "diag_min": 0.9956023823391353,
+      "diag_max": 1.002487843801084,
+      "diag_mean_abs_dev": 0.002119553031813104
+    },
+    {
+      "ik": 50,
+      "nbands": 9,
+      "offdiag_baseline": 0.0750132950646249,
+      "offdiag_corrected": 0.004611670541115559,
+      "diag_min": 0.9933284038312249,
+      "diag_max": 1.002687539381274,
+      "diag_mean_abs_dev": 0.00267442357554294
+    },
+    {
+      "ik": 150,
+      "nbands": 9,
+      "offdiag_baseline": 0.08352827281298547,
+      "offdiag_corrected": 0.004522014447158924,
+      "diag_min": 0.9914955571030241,
+      "diag_max": 1.0026200016110567,
+      "diag_mean_abs_dev": 0.0033900605241195597
+    },
+    {
+      "ik": 300,
+      "nbands": 9,
+      "offdiag_baseline": 0.08331655376467814,
+      "offdiag_corrected": 0.004934631390212113,
+      "diag_min": 0.9921847807655025,
+      "diag_max": 1.0000699238875805,
+      "diag_mean_abs_dev": 0.0027509582272564614
+    }
+  ],
+  "si": [
+    {
+      "ik": 1,
+      "nbands": 4,
+      "offdiag_baseline": 1.4066724494039667e-08
+    },
+    {
+      "ik": 2,
+      "nbands": 4,
+      "offdiag_baseline": 0.0033139919315510226
+    },
+    {
+      "ik": 50,
+      "nbands": 4,
+      "offdiag_baseline": 0.014853471112959394
+    },
+    {
+      "ik": 150,
+      "nbands": 4,
+      "offdiag_baseline": 0.019264339911655843
+    },
+    {
+      "ik": 300,
+      "nbands": 4,
+      "offdiag_baseline": 0.016360495299217848
+    }
+  ]
+}
