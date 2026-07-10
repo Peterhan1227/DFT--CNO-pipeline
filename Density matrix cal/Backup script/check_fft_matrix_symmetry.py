@@ -24,15 +24,20 @@ that mismatch algebraically:
     1 in proportion to how far off-grid the symmetry map lands.
 """
 
+import sys
 import numpy as np
 from pathlib import Path
+
+PIPELINE_DIR = Path(__file__).resolve().parent.parent   # Density matrix cal/
+sys.path.insert(0, str(PIPELINE_DIR))
+sys.path.insert(0, str(PIPELINE_DIR / "helper functions"))
 from config import MATERIAL, OUTPUT_SUBDIR, WS_CENTER_COORD_TYPE, WS_CENTER
 from ws_cell import read_poscar_structure
 
 # ── which operation to check -- must match a key in R_CART below ─────────────
 OPERATION = "swap_xy"     # "swap_xy" | "c3_111" | "inversion"
 
-data_dir   = Path(__file__).resolve().parent / "Data" / MATERIAL
+data_dir   = PIPELINE_DIR / "Data" / MATERIAL
 output_dir = data_dir / "output" / OUTPUT_SUBDIR
 
 Nx, Ny, Nz = (int(v) for v in np.load(output_dir / "fft_grid_shape.npy"))

@@ -8,14 +8,19 @@ D_ij = <phi_i | R | phi_j>  evaluated by direct interpolation in WS coordinates:
 
 Diagonalising D gives symmetry-adapted combinations: phi_new_a = sum_j phi_j * U[j,a].
 """
+import sys
 import numpy as np
 from pathlib import Path
 from scipy.ndimage import map_coordinates
 from config import MATERIAL, OUTPUT_SUBDIR, WS_CENTER_COORD_TYPE, WS_CENTER
 
+sys.path.insert(0, str(Path(__file__).resolve().parent / "helper functions"))
+
 # ── settings ──────────────────────────────────────────────────────────────────
-index_groups     = [[2, 3]]     # list of degenerate subspaces to symmetry-adapt, e.g. [[2,3],[4,5,6]]
-operation        = "swap_xy"    # "swap_xy" | "c3_111" | "inversion"
+index_groups     = [[2, 3], [4, 5], [8, 9]]     # list of degenerate subspaces to symmetry-adapt, e.g. [[2,3],[4,5,6]]
+operation        = "c3_z"       # Si (diamond, D3d):   "swap_xy" | "c3_111" | "inversion"
+                                 # WSe2_mono (1H, D3h): "c3_z" | "sigma_h" | "sigma_v"
+                                 # (D3h has NO inversion center -- see R_CART guard below)
 out_name         = "cnos_sym_adapted.npy"
 export_cubes     = True         # True: swap cno_orbitals.npy -> out_name, run export_cubes.py, restore
 check_occ_cutoff = 0.03         # check non-selected CNOs with occupation above this value
@@ -92,10 +97,30 @@ _latvec = read_poscar_structure(
     Path(__file__).resolve().parent / "Data" / MATERIAL / "POSCAR")[0]   # (3,3) rows a_i
 
 R_CART = {
+    # Si (diamond, D3d bond-center site symmetry):
     "inversion": -np.eye(3, dtype=float),                                   # r -> -r about center
-    "c3_111":    np.array([[0, 1, 0], [0, 0, 1], [1, 0, 0]], dtype=float),  # 120° about [111]
+    "c3_111":    np.array([[0, 1, 0], [0, 0, 1], [1, 0, 0]], dtype=float),  # 120° about cubic [111]
     "swap_xy":   np.array([[0, 1, 0], [1, 0, 0], [0, 0, 1]], dtype=float),  # Cartesian x<->y mirror
+    # WSe2_mono (1H, D3h point group -- verified against Data/WSe2_mono/POSCAR's
+    # hexagonal lattice vectors, integer fractional matrices confirmed):
+    "c3_z":      np.array([[-0.5, -np.sqrt(3) / 2, 0],
+                            [np.sqrt(3) / 2, -0.5, 0],
+                            [0, 0, 1]], dtype=float),                       # 120° rotation about z
+    "sigma_h":   np.diag([1.0, 1.0, -1.0]),                                 # horizontal mirror z -> -z
+    "sigma_v":   np.diag([1.0, -1.0, 1.0]),                                 # a vertical mirror plane
 }
+
+# D3h (WSe2_mono's point group) has NO inversion center -- unlike Si's D3d, "-I"
+# is not one of its 12 elements. The integer-fractional-matrix check below would
+# NOT catch this (-I is trivially an integer lattice operation for ANY Bravais
+# lattice, valid or not as a true site symmetry), so it's guarded explicitly here
+# instead of relying on that check to fail.
+if operation == "inversion" and MATERIAL == "WSe2_mono":
+    raise ValueError(
+        "'inversion' is not a symmetry of WSe2_mono's point group (D3h has no "
+        "inversion center) -- use 'c3_z', 'sigma_h', or 'sigma_v' instead."
+    )
+
 _S_cart = R_CART[operation]
 _R_frac = np.linalg.inv(_latvec.T) @ _S_cart @ _latvec.T
 R_inv = np.round(_R_frac)

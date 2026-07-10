@@ -1,3 +1,4 @@
+import sys
 import numpy as np
 from pathlib import Path
 from vaspwfc import vaspwfc
@@ -7,6 +8,8 @@ from config import (
     USE_WS_CELL,
     WS_CENTER, WS_CENTER_COORD_TYPE, WS_TRANSLATION_SEARCH_RANGE,
 )
+
+sys.path.insert(0, str(Path(__file__).resolve().parent / "helper functions"))
 from ws_cell import read_poscar_structure, parse_ws_center, build_ws_grid_map
 
 
@@ -260,8 +263,8 @@ for ik in range(1, wfc._nkpts + 1):
         cg_dn[:, gx, gy, gz] = Ck[:, nG:]
         psi_up = _to_psi(np.fft.ifftn(cg,    axes=(1, 2, 3)) * np.sqrt(Nr), k_frac)
         psi_dn = _to_psi(np.fft.ifftn(cg_dn, axes=(1, 2, 3)) * np.sqrt(Nr), k_frac)
-        rho += wk * (psi_up.T @ (occ[:, None] * psi_up).conj()
-                   + psi_dn.T @ (occ[:, None] * psi_dn).conj())
+        rho += wk * (psi_up.T @ (psi_up).conj()
+                   + psi_dn.T @ (psi_dn).conj())
         if ik == 1:
             psi_norms_k1 = [float(np.linalg.norm(psi_up[i])) for i in range(min(3, nb))]
     else:

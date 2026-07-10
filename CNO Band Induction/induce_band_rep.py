@@ -60,6 +60,7 @@ PIPELINE_DIR  = REPO_ROOT / "Density matrix cal"
 IRREP_DIR     = REPO_ROOT / "Irrep"
 
 sys.path.insert(0, str(PIPELINE_DIR))
+sys.path.insert(0, str(PIPELINE_DIR / "helper functions"))
 sys.path.insert(0, str(IRREP_DIR / "scripts"))
 
 from ws_cell import read_poscar_structure               # noqa: E402

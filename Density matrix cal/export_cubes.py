@@ -1,6 +1,9 @@
+import sys
 import numpy as np
 from pathlib import Path
 from config import MATERIAL, OUTPUT_SUBDIR
+
+sys.path.insert(0, str(Path(__file__).resolve().parent / "helper functions"))
 from ws_cell import read_poscar_structure
 
 

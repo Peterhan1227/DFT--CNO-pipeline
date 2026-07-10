@@ -445,6 +445,7 @@ _render_3d = render_cno_3d
 if _render_3d:
     try:
         from cno_visualizer.snapshot import render_density_gif
+        sys.path.insert(0, str(base_dir / "helper functions"))
         from ws_cell import read_poscar_structure
         _lat3d, _, _, _asym3d, _, _, _acart3d = read_poscar_structure(poscar_path)
         print("3D snapshots         : ON  (CNO-Visualizer found)")

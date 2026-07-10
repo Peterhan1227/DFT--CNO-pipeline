@@ -33,6 +33,7 @@ from config import (
     RESTRICT_TO_FERMI_WINDOW, EFERMI, FERMI_WINDOW_EV,
     USE_WS_CELL, WS_CENTER, WS_CENTER_COORD_TYPE, WS_TRANSLATION_SEARCH_RANGE,
 )
+sys.path.insert(0, str(Path(__file__).resolve().parent / "helper functions"))
 from ws_cell import read_poscar_structure, parse_ws_center
 from direct_fourier import fourier_eval_bands, ws_membership
 

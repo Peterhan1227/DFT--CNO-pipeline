@@ -2,24 +2,38 @@
 PAW-augmentation-corrected real-space CNO density matrix.
 
 Extends paw_overlap.py's band-pair overlap correction to a full site-restricted
-(WS-cell) density-matrix / natural-orbital-occupation calculation, following
-TASK_BRIEF.md section 2's "generalized eigenvalue problem" recommendation:
+(WS-cell) density-matrix / natural-orbital-occupation calculation.
 
-    D v = lambda * S v
+Correct occupation eigenproblem (this is NOT a generalized eigenvalue problem
+D v = lambda S v -- an earlier version of this script solved that, which is
+wrong; see below for why):
 
-instead of main.py's plain  rho v = lambda v.
+D is built (in build_density_matrix) as an OUTER-PRODUCT coefficient sum,
 
-Key idea (derivation in RESULTS.md): treat the Nr real-space FFT/WS grid
-points as a basis {|r>}. Because IFFT is a unitary map between the
-(zero-padded) plane-wave coefficient vector and the real-space grid vector
-(Parseval), this basis is *exactly* orthonormal under the plane-wave-only
-inner product -- so D (built exactly as main.py builds its density matrix,
-but from RAW un-renormalized coefficients) needs no change. Only the metric
-changes:
+    D_rr' = sum_nk w_k f_nk c_r(nk) c_r'(nk)*
+
+i.e. the density operator is rho_hat = sum_rr' D_rr' |chi_r><chi_r'|, where
+{|chi_r>} is the (non-orthogonal) real-space grid basis with metric
+<chi_r|chi_r'> = S_rr'. Solving rho_hat|phi> = lambda|phi> for
+|phi> = sum_r y_r |chi_r> gives, after expanding <chi_r'|phi> = sum_s S_r's y_s:
+
+    (D S) y = lambda y
+
+NOT D v = lambda S v (that equation is what you'd solve if D were instead the
+covariant matrix elements <chi_r|rho_hat|chi_r'>, which it is not -- it's the
+outer-product coefficient matrix). D S is not Hermitian, but it is similar to
+the manifestly Hermitian M = S^(1/2) D S^(1/2) via conjugation by S^(1/2)
+(S^(1/2) (D S) S^(-1/2) = S^(1/2) D S^(1/2) = M), so DS has the same real
+eigenvalues as M, and if M y' = lambda y' (y' plain-orthonormal, from
+np.linalg.eigh), then x = S^(-1/2) y' satisfies (DS) x = lambda x and
+x^H S x = delta_ij (S-metric-orthonormal) -- this is solved via
+solve_paw_cno() below.
+
+The metric S itself:
 
     S[r, r'] = delta(r, r') + sum_{atom images R} sum_ij  p~_i(r - R) Qij p~_j*(r' - R)
 
-This is the position-space representation of the PAW operator
+is the position-space representation of the PAW operator
 S_hat = 1 + sum_i |p~_i> Qij <p~_j|, evaluated directly at the ACTUAL
 (possibly WS-cell-unwrapped, multi-cell) Cartesian grid coordinates -- no
 Bloch phase needed, because S_hat is a k-independent local real-space
@@ -28,8 +42,12 @@ only pawpotcar's radial projector splines + Qij (paw.py) and sph_harm.sph_r
 -- no pysbt, no real-space AE partial-wave reconstruction.
 
 Does NOT run or modify main.py/config.py; reads config.py and ws_cell.py
-(read-only imports) to reproduce the exact WSe2 W_center setup, and writes
-all outputs under paw_augmentation/output/, never under Data/*/output/.
+(read-only imports) to reproduce the exact WS-cell setup for whatever
+MATERIAL/OUTPUT_SUBDIR config.py currently specifies, and writes all outputs
+under paw_augmentation/output/, never under Data/*/output/. Reads WAVECAR/
+POSCAR/POTCAR/EIGENVAL from Density matrix cal/Data/<MATERIAL>/ by default
+(live data) -- pass an explicit data_dir to main() to point at a snapshot
+instead (e.g. for a frozen/mismatched-data regression check).
 """
 import sys
 import time
@@ -38,7 +56,15 @@ from pathlib import Path
 import numpy as np
 from scipy.linalg import eigh as sc_eigh
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # for config, ws_cell
+# Force line-buffered stdout: when this script's output is redirected to a
+# file (e.g. run in the background), Python otherwise block-buffers instead
+# of flushing per line, so prints only appear once the process exits -- no
+# use for watching a multi-minute run in progress. This makes every print()
+# show up immediately regardless of where stdout is going.
+sys.stdout.reconfigure(line_buffering=True)
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # for config
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "helper functions"))  # for ws_cell
 from ws_cell import read_poscar_structure, parse_ws_center, build_ws_grid_map  # noqa: E402
 
 from vaspwfc import vaspwfc  # noqa: E402
@@ -50,7 +76,7 @@ OUT.mkdir(exist_ok=True)
 
 
 def build_real_space_S(pawpp, elements_idx, atom_cart, latvec, r_grid_cart,
-                        nmax=4, dist_prune=16.0):
+                        nmax=4, dist_prune=16.0, verbose=True):
     """
     Build the (Nr, Nr) real-space PAW metric matrix
 
@@ -78,6 +104,7 @@ def build_real_space_S(pawpp, elements_idx, atom_cart, latvec, r_grid_cart,
 
     S = np.eye(Nr, dtype=np.complex128)
 
+    t0 = time.time()
     n_images_used = 0
     for iatom in range(natoms):
         pp = pawpp[elements_idx[iatom]]
@@ -87,6 +114,10 @@ def build_real_space_S(pawpp, elements_idx, atom_cart, latvec, r_grid_cart,
         images_cart = atom_cart[iatom] + all_n_cart  # (nimg, 3)
         d_centroid = np.linalg.norm(images_cart - centroid[None, :], axis=1)
         candidate_idx = np.where(d_centroid < dist_prune)[0]
+
+        if verbose:
+            print(f"  atom {iatom + 1}/{natoms}  ({len(candidate_idx)} candidate "
+                  f"images within {dist_prune} Ang)  elapsed={time.time()-t0:.1f}s")
 
         for ii in candidate_idx:
             Rimg = images_cart[ii]
@@ -142,6 +173,7 @@ def build_density_matrix(wfc, kfrac_all, kweights, ispin, Nr, ngrid,
     Nx, Ny, Nz = ngrid
     D = np.zeros((Nr, Nr), dtype=np.complex128)
     t0 = time.time()
+    t_prev = t0
 
     for ik in range(1, wfc._nkpts + 1):
         wk = kweights[ik - 1]
@@ -174,24 +206,108 @@ def build_density_matrix(wfc, kfrac_all, kweights, ispin, Nr, ngrid,
 
         D += wk * (psi.T @ (occ[:, None] * psi).conj())
 
-        if verbose and (ik == 1 or ik % 40 == 0 or ik == wfc._nkpts):
+        if verbose and (ik == 1 or ik % 10 == 0 or ik == wfc._nkpts):
+            now = time.time()
             print(f"  k {ik:4d}/{wfc._nkpts}  wk={wk:.6f}  bands={nb}  "
-                  f"elapsed={time.time()-t0:.1f}s")
+                  f"+{now - t_prev:.1f}s since last print  elapsed={now - t0:.1f}s")
+            t_prev = now
 
     return D
 
 
-def main():
+def solve_paw_cno(D, S, min_s_eval_tol=1e-10):
+    """
+    Correct PAW-CNO occupation eigenproblem: eigenvalues of D @ S (equivalently
+    of the Hermitian M = S^(1/2) D S^(1/2)), NOT of the generalized problem
+    D v = lambda S v -- see module docstring for the derivation of why.
+
+    Returns
+    -------
+    eigvals : (Nr,) real, sorted descending
+    eigvecs : (Nr, Nr) columns are S-metric-orthonormal (x_i^H S x_j = delta_ij),
+              in the same grid-coefficient representation as D/S.
+    diag    : dict of diagnostics (see keys below)
+    """
+    Nr = D.shape[0]
+    t0 = time.time()
+
+    D = 0.5 * (D + D.conj().T)
+    S = 0.5 * (S + S.conj().T)
+    print(f"  [1/6] Hermitized D, S ({Nr}x{Nr})  +{time.time()-t0:.1f}s")
+
+    t1 = time.time()
+    print(f"  [2/6] diagonalizing S (eigh, {Nr}x{Nr}) ...")
+    s_eval, s_vec = np.linalg.eigh(S)
+    print(f"        done  +{time.time()-t1:.1f}s")
+    if s_eval.min() <= min_s_eval_tol:
+        print(f"  S is not positive definite: min(s_eval)={s_eval.min():.4e} "
+              f"<= tol={min_s_eval_tol:.1e}")
+        print(f"  smallest 10 S eigenvalues: {np.sort(s_eval)[:10]}")
+        raise ValueError(
+            f"S metric is not positive definite (min eigenvalue {s_eval.min():.4e} "
+            f"<= {min_s_eval_tol:.1e}) -- cannot form S^(1/2)/S^(-1/2)."
+        )
+    print(f"        min(s_eval)={s_eval.min():.4e}  max(s_eval)={s_eval.max():.4e}")
+
+    t1 = time.time()
+    print("  [3/6] building S^(1/2), S^(-1/2) ...")
+    S_half = (s_vec * np.sqrt(s_eval)) @ s_vec.conj().T
+    S_inv_half = (s_vec * (1.0 / np.sqrt(s_eval))) @ s_vec.conj().T
+    print(f"        done  +{time.time()-t1:.1f}s")
+
+    t1 = time.time()
+    print("  [4/6] building M = S^(1/2) D S^(1/2) ...")
+    M = S_half @ D @ S_half
+    M = 0.5 * (M + M.conj().T)
+    print(f"        done  +{time.time()-t1:.1f}s")
+
+    t1 = time.time()
+    print(f"  [5/6] diagonalizing M (eigh, {Nr}x{Nr}) ...")
+    eigvals, yvecs = np.linalg.eigh(M)
+    order = np.argsort(eigvals)[::-1]
+    eigvals = eigvals[order]
+    yvecs = yvecs[:, order]
+    print(f"        done  +{time.time()-t1:.1f}s")
+
+    t1 = time.time()
+    print("  [6/6] converting eigenvectors back (S^(-1/2) yvecs) and checking "
+          "S-orthonormality ...")
+    eigvecs = S_inv_half @ yvecs
+
+    # S-metric orthonormality error of the returned eigenvectors: should be ~0
+    check = eigvecs.conj().T @ S @ eigvecs
+    s_orthonorm_err = float(np.max(np.abs(check - np.eye(check.shape[0]))))
+    print(f"        done  +{time.time()-t1:.1f}s  total solve_paw_cno time "
+          f"{time.time()-t0:.1f}s")
+
+    tr_DS = float(np.trace(D @ S).real)
+    diag = dict(
+        min_s_eval=float(s_eval.min()),
+        max_eigval=float(eigvals.max()),
+        min_eigval=float(eigvals.min()),
+        n_out_of_bounds=int(np.sum((eigvals < -1e-3) | (eigvals > 1 + 1e-3))),
+        sum_eigvals=float(eigvals.sum()),
+        tr_DS=tr_DS,
+        sum_vs_tr_DS_diff=float(abs(eigvals.sum() - tr_DS)),
+        s_orthonorm_err=s_orthonorm_err,
+    )
+    return eigvals, eigvecs, diag
+
+
+def main(data_dir=None):
     import config  # read-only
 
     material = config.MATERIAL
     ispin = config.ISPIN
-    # NOTE: reading from the frozen snapshot, not Data/<material> directly --
-    # see diagnostics.py header / RESULTS.md: Data/WSe2_mono/WAVECAR was
-    # overwritten mid-task by what looks like the user's own concurrent VASP
-    # work, so all results in this folder are pinned to a snapshot taken at
-    # 2026-07-09T14:20:28Z for internal self-consistency.
-    data_dir = Path(__file__).resolve().parent / "data_snapshot" / material
+    # Live data by default -- Data/WSe2_mono now has a matching plain-W
+    # WAVECAR+POTCAR pair (the earlier mismatch from a concurrent VASP run
+    # has been resolved), so the data_snapshot/ workaround from that incident
+    # is no longer used unless a caller explicitly passes data_dir (e.g. to
+    # rerun against a frozen snapshot for comparison).
+    if data_dir is None:
+        data_dir = Path(__file__).resolve().parent.parent / "Data" / material
+    else:
+        data_dir = Path(data_dir)
 
     print(f"=== PAW-corrected CNO density matrix: {material} / "
           f"{config.OUTPUT_SUBDIR} ===\n")
@@ -286,63 +402,97 @@ def main():
     print(f"  max={eigvals_uncorr.max():.6f}  sum={eigvals_uncorr.sum():.6f}")
     np.save(OUT / "cno_occupations_uncorrected_samedata.npy", eigvals_uncorr)
 
-    # ── Solve generalized eigenproblem D v = lambda S v ────────────────────
-    print("\nSolving generalized eigenproblem D v = lambda S v ...")
+    # ── Solve the CORRECT PAW-CNO occupation eigenproblem: eigenvalues of ──
+    # D @ S (via Hermitian M = S^(1/2) D S^(1/2)) -- see module docstring and
+    # solve_paw_cno() for why this replaces the generalized problem
+    # D v = lambda S v used by an earlier version of this script.
+    print("\nSolving PAW-CNO occupation eigenproblem (eigenvalues of D @ S, "
+          "via Hermitian S^(1/2) D S^(1/2)) ...")
     t0 = time.time()
-    D_ws_h = 0.5 * (D_ws + D_ws.conj().T)
-    S_ws_h = 0.5 * (S_ws + S_ws.conj().T)
-    try:
-        eigvals, eigvecs = sc_eigh(D_ws_h, S_ws_h)
-    except np.linalg.LinAlgError as e:
-        print(f"  eigh(D,S) failed: {e}")
-        raise
+    eigvals, eigvecs, diag = solve_paw_cno(D_ws, S_ws)
     print(f"  done in {time.time()-t0:.1f}s")
 
-    order = np.argsort(eigvals)[::-1]
-    eigvals = eigvals[order]
-    eigvecs = eigvecs[:, order]
     top20 = eigvals[:20]
     n_occ = int(np.sum(eigvals > 1e-6))
-    n_out_of_bounds = int(np.sum((eigvals < -1e-3) | (eigvals > 1 + 1e-3)))
 
     print(f"Top 20 corrected CNO occupations: {[round(float(v), 6) for v in top20]}")
-    print(f"Sum={eigvals.sum():.6f}  N(>1e-6)={n_occ}  "
-          f"N(outside [0,1] by >1e-3)={n_out_of_bounds}")
-    print(f"min={eigvals.min():.6f}  max={eigvals.max():.6f}")
+    print(f"Sum={diag['sum_eigvals']:.6f}  N(>1e-6)={n_occ}  "
+          f"N(outside [0,1] by >1e-3)={diag['n_out_of_bounds']}")
+    print(f"min={diag['min_eigval']:.6f}  max={diag['max_eigval']:.6f}")
+    print(f"min(S eigenvalue)={diag['min_s_eval']:.4e}  "
+          f"Tr(D S)={diag['tr_DS']:.6f}  "
+          f"|sum(eigvals) - Tr(D S)|={diag['sum_vs_tr_DS_diff']:.4e}  "
+          f"S-orthonormality error of eigenvectors={diag['s_orthonorm_err']:.4e}")
 
     np.save(OUT / "cno_occupations_corrected.npy", eigvals)
-    # NOTE: these are eigenvectors of the GENERALIZED problem D v = lambda S v,
+    # NOTE: these are eigenvectors of DS / M=S^(1/2)DS^(1/2) (see solve_paw_cno),
     # normalized as v^H S v = 1 (S-metric), NOT the plain v^H v = 1 convention
     # main.py's cno_orbitals.npy uses. Do not feed directly into export_cubes.py
     # or other main.py-pipeline tools without accounting for this -- the
     # real-space amplitude/normalization differs from the uncorrected convention.
     np.save(OUT / "cno_orbitals_corrected.npy", eigvecs)
 
+    # ── Debug-only comparison: the INCORRECT generalized-eigenproblem route ─
+    # D v = lambda S v (equivalent to eigenvalues of S^(-1/2) D S^(-1/2), the
+    # INVERSE-metric direction) is NOT the physical occupation spectrum for
+    # this D/S construction -- see module docstring. Kept only so the wrong
+    # and right answers can be compared side by side; never use eigvals_debug
+    # as the reported result.
+    print("\n[debug only -- incorrect/inverse-metric test] "
+          "generalized eigh(D, S) (D v = lambda S v) ...")
+    t0 = time.time()
+    D_ws_h = 0.5 * (D_ws + D_ws.conj().T)
+    S_ws_h = 0.5 * (S_ws + S_ws.conj().T)
+    try:
+        eigvals_debug, _ = sc_eigh(D_ws_h, S_ws_h)
+        eigvals_debug = np.sort(eigvals_debug)[::-1]
+        print(f"  done in {time.time()-t0:.1f}s")
+        print(f"  [debug/incorrect] top 20: {[round(float(v), 6) for v in eigvals_debug[:20]]}")
+        print(f"  [debug/incorrect] max={eigvals_debug.max():.6f}  "
+              f"sum={eigvals_debug.sum():.6f}")
+    except np.linalg.LinAlgError as e:
+        print(f"  [debug/incorrect] eigh(D,S) failed (not fatal, debug-only): {e}")
+        eigvals_debug = None
+
     with open(OUT / "paw_density_matrix_report.txt", "w") as f:
         f.write("=== PAW-corrected CNO density matrix report ===\n\n")
+        f.write("Correct PAW-CNO occupations are eigenvalues of S^(1/2) D S^(1/2)\n"
+                "(equivalently of D @ S), NOT of the generalized problem\n"
+                "D v = lambda S v -- see module docstring / solve_paw_cno() for\n"
+                "the derivation.\n\n")
         f.write(f"material: {material}  output_subdir: {config.OUTPUT_SUBDIR}\n")
+        f.write(f"data_dir: {data_dir}\n")
         f.write(f"ws_center: {config.WS_CENTER} ({config.WS_CENTER_COORD_TYPE}) "
                 f"-> {center_cart.tolist()} Ang\n")
         f.write(f"grid: ({Nx},{Ny},{Nz})  Nr={Nr}\n")
         f.write(f"n_atom_images_in_S: {n_img}\n")
         f.write(f"herm_err_S: {herm_err_S:.4e}\n")
         f.write(f"herm_err_D: {herm_err_D:.4e}\n")
+        f.write(f"min_s_eval: {diag['min_s_eval']:.6e}\n")
         f.write(f"Tr(D): {tr_D:.8f}\n")
-        f.write(f"Tr(D S): {N_check:.8f}\n")
+        f.write(f"Tr(D S): {diag['tr_DS']:.8f}\n")
         f.write(f"\nuncorrected (same-data, plain eigh(D), no S) max_eigval: "
                 f"{eigvals_uncorr.max():.8f}\n")
         f.write(f"uncorrected top_20: {[round(float(v), 6) for v in eigvals_uncorr[:20]]}\n")
-        f.write(f"\nsum_corrected_eigvals: {eigvals.sum():.8f}\n")
+        f.write(f"\nsum_corrected_eigvals: {diag['sum_eigvals']:.8f}\n")
         f.write(f"n_eigval_gt_1e-6: {n_occ}\n")
-        f.write(f"n_eigval_outside_[0,1]_by_gt_1e-3: {n_out_of_bounds}\n")
-        f.write(f"min_eigval: {eigvals.min():.8f}\n")
-        f.write(f"max_eigval: {eigvals.max():.8f}\n")
+        f.write(f"n_eigval_outside_[0,1]_by_gt_1e-3: {diag['n_out_of_bounds']}\n")
+        f.write(f"min_eigval: {diag['min_eigval']:.8f}\n")
+        f.write(f"max_eigval: {diag['max_eigval']:.8f}\n")
+        f.write(f"|sum(eigvals) - Tr(D S)|: {diag['sum_vs_tr_DS_diff']:.4e}\n")
+        f.write(f"S-metric orthonormality error of returned eigenvectors "
+                f"(max|eigvecs^H S eigvecs - I|): {diag['s_orthonorm_err']:.4e}\n")
         f.write("top_20_corrected_cno_occupations:\n")
         for i, v in enumerate(top20):
             f.write(f"  CNO {i:3d} : {float(v):.10e}\n")
-        f.write("\ncno_orbitals_corrected.npy: eigenvectors of D v = lambda S v, "
-                 "normalized v^H S v = 1 (S-metric) -- NOT the plain v^H v = 1 "
-                 "convention main.py's cno_orbitals.npy uses.\n")
+        f.write("\ncno_orbitals_corrected.npy: eigenvectors of D @ S (S-metric "
+                 "orthonormal, v^H S v = 1) -- NOT the plain v^H v = 1 convention "
+                 "main.py's cno_orbitals.npy uses.\n")
+        if eigvals_debug is not None:
+            f.write("\n[DEBUG ONLY -- INCORRECT / inverse-metric test, NOT the "
+                    "physical result] generalized eigh(D, S) (D v = lambda S v):\n")
+            f.write(f"  top_20: {[round(float(v), 6) for v in eigvals_debug[:20]]}\n")
+            f.write(f"  max={eigvals_debug.max():.8f}  sum={eigvals_debug.sum():.8f}\n")
 
     print(f"\nSaved report -> {OUT / 'paw_density_matrix_report.txt'}")
 

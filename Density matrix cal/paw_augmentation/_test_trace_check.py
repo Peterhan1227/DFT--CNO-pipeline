@@ -3,6 +3,7 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "helper functions"))
 from ws_cell import read_poscar_structure
 
 from vaspwfc import vaspwfc

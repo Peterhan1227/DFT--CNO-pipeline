@@ -14,6 +14,7 @@ Output: Data/<MATERIAL>/output/ws_cell_debug.html  (auto-opened in browser)
 Requires plotly:  pip install plotly
 """
 
+import sys
 import numpy as np
 from pathlib import Path
 
@@ -21,6 +22,10 @@ try:
     import plotly.graph_objects as go
 except ImportError:
     raise ImportError("plotly is required.  Install with:  pip install plotly")
+
+PIPELINE_DIR = Path(__file__).resolve().parent.parent   # Density matrix cal/
+sys.path.insert(0, str(PIPELINE_DIR))
+sys.path.insert(0, str(PIPELINE_DIR / "helper functions"))
 
 from config import (
     MATERIAL, OUTPUT_SUBDIR,
@@ -31,7 +36,7 @@ from ws_cell import read_poscar_structure, parse_ws_center, build_ws_grid_map
 
 
 # ── paths ──────────────────────────────────────────────────────────────────────
-base_dir    = Path(__file__).resolve().parent
+base_dir    = PIPELINE_DIR
 data_dir    = base_dir / "Data" / MATERIAL
 output_dir  = data_dir / "output" / OUTPUT_SUBDIR
 poscar_path = data_dir / "POSCAR"

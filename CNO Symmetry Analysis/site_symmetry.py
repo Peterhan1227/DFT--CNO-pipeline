@@ -83,6 +83,7 @@ from scipy.ndimage import map_coordinates
 HERE         = Path(__file__).resolve().parent
 PIPELINE_DIR = HERE.parent / "Density matrix cal"
 sys.path.insert(0, str(PIPELINE_DIR))
+sys.path.insert(0, str(PIPELINE_DIR / "helper functions"))
 
 from ws_cell import read_poscar_structure, parse_ws_center
 import spglib
