@@ -5,14 +5,12 @@ __pycache__/
 VaspBandUnfolding/
 
 # VASP large binary files
-WAVECAR
-WAVECAR_lm
-WAVECAR_dos
+WAVECAR*
 
 # VASP input files (POTCAR is licensed pseudopotential data -- never redistribute)
 POTCAR
 POSCAR*
-KPOINTS
+KPOINTS*
 EIGENVAL*
 
 # IrRep outputs
