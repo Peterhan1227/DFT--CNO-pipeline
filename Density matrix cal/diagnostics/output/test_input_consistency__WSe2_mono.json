@@ -1,0 +1,109 @@
+{
+  "material": "WSe2_mono",
+  "data_dir": "C:\\Users\\hanziruopeter\\OneDrive\\Personal files\\Academic\\Physics\\Research\\Columbia Raquel\\Density matrix cal\\Data\\WSe2_mono",
+  "tol": {
+    "lattice_ang": 0.0001,
+    "kfrac": 1e-06,
+    "energy_ev": 0.001,
+    "occupation": 1e-06,
+    "gram_corrected": 0.0001,
+    "fft_roundtrip": 1e-09,
+    "direct_fourier": 1e-08,
+    "bloch_covariance": 1e-08,
+    "ws_permutation": 0,
+    "bvk_identity": 1e-10,
+    "bvk_bound": 1e-09
+  },
+  "hashes": {
+    "WAVECAR": {
+      "present": true,
+      "sha256": "bc2d71dc223c8cc3947c51b8cf6c442ca9ab53d98925d4ade4188944fbae3b7d",
+      "size_bytes": 132735168
+    },
+    "POTCAR": {
+      "present": true,
+      "sha256": "7ef8b236d47cb52384021b0d5255b9dd2cd6fb636f1b7e0a093eff353b3a2a5c",
+      "size_bytes": 450832
+    },
+    "POSCAR": {
+      "present": true,
+      "sha256": "7555cfb5a7fd18dd48d587e181b31fc2899bff7efb9096187c48cdca88f3e699",
+      "size_bytes": 351
+    },
+    "EIGENVAL": {
+      "present": true,
+      "sha256": "1e2191fee6771bc950c99ae240555d207bf67df2483e93c1a69277483f7a0e0b",
+      "size_bytes": 224079
+    },
+    "KPOINTS": {
+      "present": true,
+      "sha256": "9ef9e1f132fe98d228ad73a7b679e4f9620edba849c8997e62c1f8a108922147",
+      "size_bytes": 399
+    }
+  },
+  "lsorbit_detected": false,
+  "wavecar": {
+    "nkpts": 324,
+    "nbands": 17,
+    "nspin": 1,
+    "encut_ev": 300.0,
+    "ngrid": [
+      11,
+      11,
+      73
+    ]
+  },
+  "weighted_occupation_count": {
+    "ispin": 1,
+    "total": 12.999999999999979,
+    "halving_triggered": false,
+    "per_k_min": 12.999999999998685,
+    "per_k_max": 13.0
+  },
+  "spin_convention": {
+    "nspin_wavecar": 1,
+    "ispin_eigenval_header": 1,
+    "ispin_config": 1,
+    "lsorbit": false,
+    "occ_max_observed": 1.0,
+    "halving_would_trigger": false,
+    "interpretation": "occ_max <= 1.5: occupations are already per-spin-orbital; main.py's '>1.5 -> halve' branch (main.py:248-249) is a no-op for this dataset."
+  },
+  "kpoints": {
+    "present": true,
+    "mode": "explicit-list",
+    "nkpts_listed": 40,
+    "matches_wavecar_nkpts": false
+  },
+  "checks": {
+    "lattice": {
+      "max_abs_diff_ang": 0.0,
+      "tol_ang": 0.0001,
+      "passed": true
+    },
+    "dims": {
+      "eigenval_nkpts": 324,
+      "wavecar_nkpts": 324,
+      "eigenval_nbands": 17,
+      "wavecar_nbands": 17,
+      "passed": true
+    },
+    "kcoord": {
+      "max_abs_diff": 4.444444429152483e-08,
+      "tol": 1e-06,
+      "passed": true
+    },
+    "band_energies": {
+      "max_abs_diff_ev": 4.994552895709603e-07,
+      "tol": 0.001,
+      "passed": true,
+      "ispin_compared": 1
+    },
+    "occupations": {
+      "max_abs_diff": 1.3142820165512603e-12,
+      "tol": 1e-06,
+      "passed": true
+    }
+  },
+  "status": "PASS"
+}

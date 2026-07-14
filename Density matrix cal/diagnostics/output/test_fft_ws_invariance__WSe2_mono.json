@@ -1,0 +1,133 @@
+{
+  "material": "WSe2_mono",
+  "data_dir": "C:\\Users\\hanziruopeter\\OneDrive\\Personal files\\Academic\\Physics\\Research\\Columbia Raquel\\Density matrix cal\\Data\\WSe2_mono",
+  "tol": {
+    "lattice_ang": 0.0001,
+    "kfrac": 1e-06,
+    "energy_ev": 0.001,
+    "occupation": 1e-06,
+    "gram_corrected": 0.0001,
+    "fft_roundtrip": 1e-09,
+    "direct_fourier": 1e-08,
+    "bloch_covariance": 1e-08,
+    "ws_permutation": 0,
+    "bvk_identity": 1e-10,
+    "bvk_bound": 1e-09
+  },
+  "lsorbit": false,
+  "ws_permutation": {
+    "Nr": 8833,
+    "n_unique_base_indices": 8833,
+    "passed": true
+  },
+  "representative_kpoints": [
+    1,
+    162,
+    324
+  ],
+  "kpoints": [
+    {
+      "ik": 1,
+      "k_frac": [
+        1.2623786234348807e-15,
+        1.2623786234348805e-15,
+        1.2623786234348803e-15
+      ],
+      "duplicate_grid_indices": {
+        "nG": 2843,
+        "n_unique": 2843,
+        "n_duplicates": 0
+      },
+      "fft_roundtrip_max_err": 1.1123893155135927e-16,
+      "fft_roundtrip_passed": true,
+      "gram_agreement": {
+        "coef_vs_primitive_u": 6.661338147750939e-16,
+        "primitive_u_vs_primitive_psi": 2.220446049250313e-16,
+        "primitive_psi_vs_ws_psi": 2.220446049250313e-16,
+        "tol": 1e-09,
+        "passed": true
+      },
+      "bloch_translation_covariance": {
+        "max_err": 2.7809732887839817e-17,
+        "tol": 1e-08,
+        "passed": true
+      },
+      "direct_fourier_agreement": {
+        "n_bands_checked": 4,
+        "max_err": 4.899449996776191e-16,
+        "tol": 1e-08,
+        "passed": true
+      },
+      "status": "OK"
+    },
+    {
+      "ik": 162,
+      "k_frac": [
+        -0.05555555555555589,
+        0.4444444444444443,
+        1.2623786234348803e-15
+      ],
+      "duplicate_grid_indices": {
+        "nG": 2827,
+        "n_unique": 2827,
+        "n_duplicates": 0
+      },
+      "fft_roundtrip_max_err": 1.1102230246251565e-16,
+      "fft_roundtrip_passed": true,
+      "gram_agreement": {
+        "coef_vs_primitive_u": 6.661338147750939e-16,
+        "primitive_u_vs_primitive_psi": 4.440892098500626e-16,
+        "primitive_psi_vs_ws_psi": 3.3306690738754696e-16,
+        "tol": 1e-09,
+        "passed": true
+      },
+      "bloch_translation_covariance": {
+        "max_err": 8.326672684688674e-17,
+        "tol": 1e-08,
+        "passed": true
+      },
+      "direct_fourier_agreement": {
+        "n_bands_checked": 4,
+        "max_err": 4.861777732900917e-16,
+        "tol": 1e-08,
+        "passed": true
+      },
+      "status": "OK"
+    },
+    {
+      "ik": 324,
+      "k_frac": [
+        -0.05555555555555589,
+        -0.05555555555555588,
+        1.2623786234348803e-15
+      ],
+      "duplicate_grid_indices": {
+        "nG": 2841,
+        "n_unique": 2841,
+        "n_duplicates": 0
+      },
+      "fft_roundtrip_max_err": 1.1103585416259206e-16,
+      "fft_roundtrip_passed": true,
+      "gram_agreement": {
+        "coef_vs_primitive_u": 6.661338147750939e-16,
+        "primitive_u_vs_primitive_psi": 4.440892098500626e-16,
+        "primitive_psi_vs_ws_psi": 2.220446049250313e-16,
+        "tol": 1e-09,
+        "passed": true
+      },
+      "bloch_translation_covariance": {
+        "max_err": 4.3885418357208765e-17,
+        "tol": 1e-08,
+        "passed": true
+      },
+      "direct_fourier_agreement": {
+        "n_bands_checked": 4,
+        "max_err": 4.71888144086622e-16,
+        "tol": 1e-08,
+        "passed": true
+      },
+      "status": "OK"
+    }
+  ],
+  "status": "PASS"
+}

@@ -1,0 +1,259 @@
+{
+  "material": "WSe2_mono",
+  "data_dir": "C:\\Users\\hanziruopeter\\OneDrive\\Personal files\\Academic\\Physics\\Research\\Columbia Raquel\\Density matrix cal\\Data\\WSe2_mono",
+  "tol": {
+    "lattice_ang": 0.0001,
+    "kfrac": 1e-06,
+    "energy_ev": 0.001,
+    "occupation": 1e-06,
+    "gram_corrected": 0.0001,
+    "fft_roundtrip": 1e-09,
+    "direct_fourier": 1e-08,
+    "bloch_covariance": 1e-08,
+    "ws_permutation": 0,
+    "bvk_identity": 1e-10,
+    "bvk_bound": 1e-09
+  },
+  "lsorbit": false,
+  "potcar_available": true,
+  "representative_kpoints": [
+    1,
+    162,
+    324
+  ],
+  "max_fractional_bands_at_any_k": 0,
+  "kpoints": [
+    {
+      "ik": 1,
+      "k_frac": [
+        1.2623786234348807e-15,
+        1.2623786234348805e-15,
+        1.2623786234348803e-15
+      ],
+      "n_occupied": 13,
+      "n_binary": 13,
+      "n_fractional": 0,
+      "halved": false,
+      "gram_raw": {
+        "nb": 13,
+        "max_diag_err": 0.5614562546755014,
+        "max_offdiag": 0.14094113427634994,
+        "herm_err": 0.0,
+        "eig_min": 0.4167464993501876,
+        "eig_max": 1.3467106078141482,
+        "norm_G_minus_I": 0.5832535006498124,
+        "tol": 0.0001,
+        "passed": false
+      },
+      "gram_norm_true": {
+        "nb": 13,
+        "max_diag_err": 1.1102230246251565e-15,
+        "max_offdiag": 0.1568738199841443,
+        "herm_err": 0.0,
+        "eig_min": 0.7792563279294822,
+        "eig_max": 1.2160098861667434,
+        "norm_G_minus_I": 0.22074367207051768,
+        "tol": 0.0001,
+        "passed": false
+      },
+      "gram_raw_binary_subset": {
+        "nb": 13,
+        "max_diag_err": 0.5614562546755014,
+        "max_offdiag": 0.14094113427634994,
+        "herm_err": 0.0,
+        "eig_min": 0.4167464993501876,
+        "eig_max": 1.3467106078141482,
+        "norm_G_minus_I": 0.5832535006498124,
+        "tol": 0.0001,
+        "passed": false,
+        "n": 13
+      },
+      "gram_raw_fractional_subset": {
+        "n": 0
+      },
+      "paw_ps_vs_gram_raw_consistency": 0.0,
+      "gram_paw_corrected": {
+        "nb": 13,
+        "max_diag_err": 0.7299442899444782,
+        "max_offdiag": 0.09794706421725216,
+        "herm_err": 4.1523888499939156e-16,
+        "eig_min": 0.2571882577631493,
+        "eig_max": 1.0119855623875125,
+        "norm_G_minus_I": 0.7428117422368505,
+        "tol": 0.0001,
+        "passed": false
+      },
+      "gram_paw_corrected_binary_subset": {
+        "nb": 13,
+        "max_diag_err": 0.7299442899444782,
+        "max_offdiag": 0.09794706421725216,
+        "herm_err": 4.1523888499939156e-16,
+        "eig_min": 0.2571882577631493,
+        "eig_max": 1.0119855623875125,
+        "norm_G_minus_I": 0.7428117422368505,
+        "tol": 0.0001,
+        "passed": false,
+        "n": 13
+      },
+      "gram_paw_corrected_fractional_subset": {
+        "n": 0
+      },
+      "status": "OK"
+    },
+    {
+      "ik": 162,
+      "k_frac": [
+        -0.05555555555555589,
+        0.4444444444444443,
+        1.2623786234348803e-15
+      ],
+      "n_occupied": 13,
+      "n_binary": 13,
+      "n_fractional": 0,
+      "halved": false,
+      "gram_raw": {
+        "nb": 13,
+        "max_diag_err": 0.558198192360085,
+        "max_offdiag": 0.13069833257502092,
+        "herm_err": 0.0,
+        "eig_min": 0.3948208302896427,
+        "eig_max": 1.401147202039724,
+        "norm_G_minus_I": 0.6051791697103571,
+        "tol": 0.0001,
+        "passed": false
+      },
+      "gram_norm_true": {
+        "nb": 13,
+        "max_diag_err": 1.3322676295501878e-15,
+        "max_offdiag": 0.1445027529822273,
+        "herm_err": 0.0,
+        "eig_min": 0.6926729405957905,
+        "eig_max": 1.259133318762127,
+        "norm_G_minus_I": 0.30732705940420935,
+        "tol": 0.0001,
+        "passed": false
+      },
+      "gram_raw_binary_subset": {
+        "nb": 13,
+        "max_diag_err": 0.558198192360085,
+        "max_offdiag": 0.13069833257502092,
+        "herm_err": 0.0,
+        "eig_min": 0.3948208302896427,
+        "eig_max": 1.401147202039724,
+        "norm_G_minus_I": 0.6051791697103571,
+        "tol": 0.0001,
+        "passed": false,
+        "n": 13
+      },
+      "gram_raw_fractional_subset": {
+        "n": 0
+      },
+      "paw_ps_vs_gram_raw_consistency": 0.0,
+      "gram_paw_corrected": {
+        "nb": 13,
+        "max_diag_err": 0.7271477611146985,
+        "max_offdiag": 0.08194803618893792,
+        "herm_err": 5.451213734191181e-16,
+        "eig_min": 0.25001493334285424,
+        "eig_max": 1.0201229595052441,
+        "norm_G_minus_I": 0.7499850666571454,
+        "tol": 0.0001,
+        "passed": false
+      },
+      "gram_paw_corrected_binary_subset": {
+        "nb": 13,
+        "max_diag_err": 0.7271477611146985,
+        "max_offdiag": 0.08194803618893792,
+        "herm_err": 5.451213734191181e-16,
+        "eig_min": 0.25001493334285424,
+        "eig_max": 1.0201229595052441,
+        "norm_G_minus_I": 0.7499850666571454,
+        "tol": 0.0001,
+        "passed": false,
+        "n": 13
+      },
+      "gram_paw_corrected_fractional_subset": {
+        "n": 0
+      },
+      "status": "OK"
+    },
+    {
+      "ik": 324,
+      "k_frac": [
+        -0.05555555555555589,
+        -0.05555555555555588,
+        1.2623786234348803e-15
+      ],
+      "n_occupied": 13,
+      "n_binary": 13,
+      "n_fractional": 0,
+      "halved": false,
+      "gram_raw": {
+        "nb": 13,
+        "max_diag_err": 0.5611577730859947,
+        "max_offdiag": 0.13821484625447797,
+        "herm_err": 0.0,
+        "eig_min": 0.4143176886651051,
+        "eig_max": 1.3483550309404753,
+        "norm_G_minus_I": 0.5856823113348957,
+        "tol": 0.0001,
+        "passed": false
+      },
+      "gram_norm_true": {
+        "nb": 13,
+        "max_diag_err": 7.771561172376096e-16,
+        "max_offdiag": 0.1521392365898407,
+        "herm_err": 0.0,
+        "eig_min": 0.7682837239966908,
+        "eig_max": 1.2316905516351593,
+        "norm_G_minus_I": 0.23171627600330988,
+        "tol": 0.0001,
+        "passed": false
+      },
+      "gram_raw_binary_subset": {
+        "nb": 13,
+        "max_diag_err": 0.5611577730859947,
+        "max_offdiag": 0.13821484625447797,
+        "herm_err": 0.0,
+        "eig_min": 0.4143176886651051,
+        "eig_max": 1.3483550309404753,
+        "norm_G_minus_I": 0.5856823113348957,
+        "tol": 0.0001,
+        "passed": false,
+        "n": 13
+      },
+      "gram_raw_fractional_subset": {
+        "n": 0
+      },
+      "paw_ps_vs_gram_raw_consistency": 0.0,
+      "gram_paw_corrected": {
+        "nb": 13,
+        "max_diag_err": 0.7296884145415939,
+        "max_offdiag": 0.09502670508608697,
+        "herm_err": 1.5281205826827586e-16,
+        "eig_min": 0.2564283918476537,
+        "eig_max": 1.0127551860051203,
+        "norm_G_minus_I": 0.743571608152347,
+        "tol": 0.0001,
+        "passed": false
+      },
+      "gram_paw_corrected_binary_subset": {
+        "nb": 13,
+        "max_diag_err": 0.7296884145415939,
+        "max_offdiag": 0.09502670508608697,
+        "herm_err": 1.5281205826827586e-16,
+        "eig_min": 0.2564283918476537,
+        "eig_max": 1.0127551860051203,
+        "norm_G_minus_I": 0.743571608152347,
+        "tol": 0.0001,
+        "passed": false,
+        "n": 13
+      },
+      "gram_paw_corrected_fractional_subset": {
+        "n": 0
+      },
+      "status": "OK"
+    }
+  ],
+  "status": "FAIL"
+}

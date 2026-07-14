@@ -1,0 +1,109 @@
+{
+  "material": "Si",
+  "data_dir": "C:\\Users\\hanziruopeter\\OneDrive\\Personal files\\Academic\\Physics\\Research\\Columbia Raquel\\Density matrix cal\\Data\\Si",
+  "tol": {
+    "lattice_ang": 0.0001,
+    "kfrac": 1e-06,
+    "energy_ev": 0.001,
+    "occupation": 1e-06,
+    "gram_corrected": 0.0001,
+    "fft_roundtrip": 1e-09,
+    "direct_fourier": 1e-08,
+    "bloch_covariance": 1e-08,
+    "ws_permutation": 0,
+    "bvk_identity": 1e-10,
+    "bvk_bound": 1e-09
+  },
+  "hashes": {
+    "WAVECAR": {
+      "present": true,
+      "sha256": "e7db70ec9d431dc11519f5a0eaecf8e5519f469429355d858359369415011a5d",
+      "size_bytes": 129284512
+    },
+    "POTCAR": {
+      "present": false,
+      "sha256": null,
+      "size_bytes": null
+    },
+    "POSCAR": {
+      "present": true,
+      "sha256": "02edd8c577c6c110f86a8750992b93cfc5fefa4bb862f8317a0a7cdc91eda8f6",
+      "size_bytes": 360
+    },
+    "EIGENVAL": {
+      "present": true,
+      "sha256": "d2b274a6bfa462e0f0881b85d2ff14be27df76fd64e92a5397eb3d362caec9da",
+      "size_bytes": 1208445
+    },
+    "KPOINTS": {
+      "present": true,
+      "sha256": "5853a1c49ed7782a4ba598c5324d49963e6ac1e02b59c0029dd8cc9152ad066b",
+      "size_bytes": 443
+    }
+  },
+  "lsorbit_detected": false,
+  "wavecar": {
+    "nkpts": 3375,
+    "nbands": 8,
+    "nspin": 1,
+    "encut_ev": 300.0,
+    "ngrid": [
+      13,
+      13,
+      13
+    ]
+  },
+  "weighted_occupation_count": {
+    "ispin": 1,
+    "total": 4.000000000000352,
+    "halving_triggered": false,
+    "per_k_min": 4.0,
+    "per_k_max": 4.0
+  },
+  "spin_convention": {
+    "nspin_wavecar": 1,
+    "ispin_eigenval_header": 1,
+    "ispin_config": 1,
+    "lsorbit": false,
+    "occ_max_observed": 1.0,
+    "halving_would_trigger": false,
+    "interpretation": "occ_max <= 1.5: occupations are already per-spin-orbital; main.py's '>1.5 -> halve' branch (main.py:248-249) is a no-op for this dataset."
+  },
+  "kpoints": {
+    "present": true,
+    "mode": "explicit-list",
+    "nkpts_listed": 20,
+    "matches_wavecar_nkpts": false
+  },
+  "checks": {
+    "lattice": {
+      "max_abs_diff_ang": 0.0,
+      "tol_ang": 0.0001,
+      "passed": true
+    },
+    "dims": {
+      "eigenval_nkpts": 3375,
+      "wavecar_nkpts": 3375,
+      "eigenval_nbands": 8,
+      "wavecar_nbands": 8,
+      "passed": true
+    },
+    "kcoord": {
+      "max_abs_diff": 3.333333709054642e-08,
+      "tol": 1e-06,
+      "passed": true
+    },
+    "band_energies": {
+      "max_abs_diff_ev": 4.999868332689061e-07,
+      "tol": 0.001,
+      "passed": true,
+      "ispin_compared": 1
+    },
+    "occupations": {
+      "max_abs_diff": 0.0,
+      "tol": 1e-06,
+      "passed": true
+    }
+  },
+  "status": "PASS"
+}

@@ -1,0 +1,72 @@
+=== Real-space quadrature convergence check ===
+
+material: WSe2_mono
+native_grid: (11, 11, 73)
+grid_factors: [1, 2, 3]
+representative_kpoints: [1, 163, 324]
+ws_center: [0.3333333333333333, 0.6666666666666666, 0.5] (fractional)
+
+--- per-kpoint reciprocal-space reference (grid-independent) ---
+  ik=   1  max_offdiag=5.4015e-06  diag=[1.00000,1.00000]
+  ik= 163  max_offdiag=9.1480e-07  diag=[1.00000,1.00000]
+  ik= 324  max_offdiag=3.2364e-06  diag=[1.00000,1.00000]
+
+--- per (k, grid_factor) results ---
+  ik=   1  f=1x  ngrid=[11, 11, 73]  Nr=8833
+    beta_diff_prim: max=3.7806e-01  rms=2.6773e-02
+    beta_diff_ws  : max=3.7806e-01  rms=2.6773e-02
+    gram_prim     : max_offdiag=1.9064e-03  diag_mean=1.00088  diag=[0.99911,1.00571]
+    gram_ws       : max_offdiag=1.9064e-03  diag_mean=1.00088  diag=[0.99911,1.00571]
+  ik= 163  f=1x  ngrid=[11, 11, 73]  Nr=8833
+    beta_diff_prim: max=3.2477e+00  rms=4.1327e-01
+    beta_diff_ws  : max=3.2477e+00  rms=4.1327e-01
+    gram_prim     : max_offdiag=2.8531e-03  diag_mean=1.00052  diag=[0.99911,1.00308]
+    gram_ws       : max_offdiag=2.8531e-03  diag_mean=1.00052  diag=[0.99911,1.00308]
+  ik= 324  f=1x  ngrid=[11, 11, 73]  Nr=8833
+    beta_diff_prim: max=5.6150e-01  rms=9.5258e-02
+    beta_diff_ws  : max=5.6150e-01  rms=9.5258e-02
+    gram_prim     : max_offdiag=1.8862e-03  diag_mean=1.00085  diag=[0.99912,1.00556]
+    gram_ws       : max_offdiag=1.8862e-03  diag_mean=1.00085  diag=[0.99912,1.00556]
+  ik=   1  f=2x  ngrid=[22, 22, 146]  Nr=70664
+    beta_diff_prim: max=8.0664e-03  rms=7.3686e-04
+    beta_diff_ws  : max=8.0664e-03  rms=7.3686e-04
+    gram_prim     : max_offdiag=1.3681e-04  diag_mean=1.00001  diag=[0.99987,1.00007]
+    gram_ws       : max_offdiag=1.3681e-04  diag_mean=1.00001  diag=[0.99987,1.00007]
+  ik= 163  f=2x  ngrid=[22, 22, 146]  Nr=70664
+    beta_diff_prim: max=3.2701e+00  rms=4.1919e-01
+    beta_diff_ws  : max=3.2701e+00  rms=4.1919e-01
+    gram_prim     : max_offdiag=1.3222e-04  diag_mean=1.00001  diag=[0.99995,1.00007]
+    gram_ws       : max_offdiag=1.3222e-04  diag_mean=1.00001  diag=[0.99995,1.00007]
+  ik= 324  f=2x  ngrid=[22, 22, 146]  Nr=70664
+    beta_diff_prim: max=5.7217e-01  rms=9.2682e-02
+    beta_diff_ws  : max=5.7217e-01  rms=9.2682e-02
+    gram_prim     : max_offdiag=1.4137e-04  diag_mean=1.00001  diag=[0.99987,1.00007]
+    gram_ws       : max_offdiag=1.4137e-04  diag_mean=1.00001  diag=[0.99987,1.00007]
+  ik=   1  f=3x  ngrid=[33, 33, 219]  Nr=238491
+    beta_diff_prim: max=8.9875e-04  rms=1.2206e-04
+    beta_diff_ws  : max=8.9875e-04  rms=1.2206e-04
+    gram_prim     : max_offdiag=7.0227e-05  diag_mean=1.00000  diag=[0.99998,1.00004]
+    gram_ws       : max_offdiag=7.0227e-05  diag_mean=1.00000  diag=[0.99998,1.00004]
+  ik= 163  f=3x  ngrid=[33, 33, 219]  Nr=238491
+    beta_diff_prim: max=3.2741e+00  rms=4.1927e-01
+    beta_diff_ws  : max=3.2741e+00  rms=4.1927e-01
+    gram_prim     : max_offdiag=7.5206e-05  diag_mean=1.00000  diag=[0.99998,1.00003]
+    gram_ws       : max_offdiag=7.5206e-05  diag_mean=1.00000  diag=[0.99998,1.00003]
+  ik= 324  f=3x  ngrid=[33, 33, 219]  Nr=238491
+    beta_diff_prim: max=5.7233e-01  rms=9.2681e-02
+    beta_diff_ws  : max=5.7233e-01  rms=9.2681e-02
+    gram_prim     : max_offdiag=6.9448e-05  diag_mean=1.00000  diag=[0.99998,1.00004]
+    gram_ws       : max_offdiag=6.9448e-05  diag_mean=1.00000  diag=[0.99998,1.00004]
+
+--- convergence summary (worst case over k-points) ---
+  f=1x  gram_prim_offdiag=2.8531e-03  gram_ws_offdiag=2.8531e-03  reciprocal_ref=5.4015e-06
+  f=2x  gram_prim_offdiag=1.4137e-04  gram_ws_offdiag=1.4137e-04  reciprocal_ref=5.4015e-06
+  f=3x  gram_prim_offdiag=7.5206e-05  gram_ws_offdiag=7.5206e-05  reciprocal_ref=5.4015e-06
+  prim shrink (1x->3x): 37.94x  (converging=True)
+  ws   shrink (1x->3x): 37.94x  (converging=True)
+
+DIAGNOSIS: quadrature_confirmed
+
+RECOMMENDATION: 1. Real-space quadrature is confirmed as the residual error source: both the primitive-cell and WS-mapped real-space beta/Gram results converge toward the reciprocal-space reference as the grid is refined. Recommend a reciprocal-space / atom-centered low-rank PAW construction for the production S matrix (the existing nonlq/Qij machinery already gives an accurate, grid-independent correction at the band-pair level) rather than relying on real-space grid refinement, which would require an impractically fine production FFT grid to reach comparable accuracy.
+
+Note: this script never builds an Nr x Nr matrix, never rescales S, and never clips occupations -- it does not touch the production S/D/eigenvalue pipeline at all. main.py and config.py were not modified (config.py was only read).

@@ -1,0 +1,50 @@
+=== Phase 1 diagnostics: localizing the K min-eigenvalue PSD violation ===
+
+material: WSe2_mono
+
+--- Step 1+2: full-system (324 k-points) reconstruction ---
+nstates: 4212
+min_eig(G_ps)    = -0.000000
+min_eig(G_aug)   = -126.802364
+min_eig(G_total) = -64.644104
+min_eig(K)       = -0.199519
+max_eig(G_total) = 323.995975   max_eig(K) = 0.999988
+Hermiticity: G_ps=6.66e-16  G_aug=1.33e-15  G_total=1.33e-15  K=4.34e-18
+K's negativity is inherited from a non-PSD G_total (congruence by sqrt(P) cannot introduce negativity that wasn't already present): True
+
+Most negative eigenvector of G_total: eigenvalue = -64.644104
+  u^H G_ps u    = 30.928456
+  u^H G_aug u   = -95.572560
+  u^H G_total u = -64.644104
+  per-atom/image decomposition (independent real-space route, sum=-3.552437):
+    atom 1 (Se)  image=(0, 0, 0)  contribution=-2.104070
+    atom 2 (Se)  image=(0, 0, 0)  contribution=-2.104069
+    atom 2 (Se)  image=(0, 1, 0)  contribution=-0.001926
+    atom 1 (Se)  image=(0, 1, 0)  contribution=-0.001926
+    atom 2 (Se)  image=(-1, 0, 0)  contribution=-0.001267
+    atom 1 (Se)  image=(-1, 0, 0)  contribution=-0.001267
+    atom 0 (W_sv)  image=(0, 0, 0)  contribution=0.662089
+
+--- Step 3: k-point subset scaling ---
+  n_k=   1  nstates=   13  min_eig(G_total)=0.999992  min_eig(K)=0.003086
+  n_k=   2  nstates=   26  min_eig(G_total)=0.000002  min_eig(K)=0.000000
+  n_k=   4  nstates=   52  min_eig(G_total)=-0.075677  min_eig(K)=-0.000234
+  n_k=   8  nstates=  104  min_eig(G_total)=-1.563972  min_eig(K)=-0.004827
+  n_k=  16  nstates=  208  min_eig(G_total)=-3.188562  min_eig(K)=-0.009841
+  n_k=  32  nstates=  416  min_eig(G_total)=-6.368415  min_eig(K)=-0.019656
+  n_k=  64  nstates=  832  min_eig(G_total)=-12.772730  min_eig(K)=-0.039422
+  n_k= 128  nstates= 1664  min_eig(G_total)=-25.551261  min_eig(K)=-0.078862
+  n_k= 256  nstates= 3328  min_eig(G_total)=-51.080514  min_eig(K)=-0.157656
+  n_k= 324  nstates= 4212  min_eig(G_total)=-64.644104  min_eig(K)=-0.199519
+
+--- Step 4: random gauge invariance ---
+max|eig(G_total)-eig(G_total_gauged)| = 3.9790e-13
+max|eig(K)-eig(K_gauged)|             = 1.4433e-15
+passed: True
+
+--- Step 5: spectral-norm comparison (8 k-points, 3x real-space reference) ---
+kpoints: [1, 41, 81, 122, 163, 203, 244, 284]  n_states: 104
+spectral_norm(G_aug_lowrank - G_aug_3x) = 8.4737e-04
+max|entry| = 7.8579e-05
+
+total_runtime_s: 269.9

@@ -8,8 +8,12 @@ Run:
     PYTHONPATH=<repo_root>/VaspBandUnfolding PYTHONIOENCODING=utf-8 \
         <python> diagnostics.py
 """
+import sys
 import json
+from pathlib import Path
 import numpy as np
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # for paw_overlap (paw_augmentation/)
 from vaspwfc import vaspwfc
 from paw_overlap import PawOverlapCorrector, offdiag_maxabs, diag_stats
 

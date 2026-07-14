@@ -1,0 +1,239 @@
+{
+  "material": "CoSn",
+  "data_dir": "C:\\Users\\hanziruopeter\\OneDrive\\Personal files\\Academic\\Physics\\Research\\Columbia Raquel\\Density matrix cal\\Data\\CoSn",
+  "tol": {
+    "lattice_ang": 0.0001,
+    "kfrac": 1e-06,
+    "energy_ev": 0.001,
+    "occupation": 1e-06,
+    "gram_corrected": 0.0001,
+    "fft_roundtrip": 1e-09,
+    "direct_fourier": 1e-08,
+    "bloch_covariance": 1e-08,
+    "ws_permutation": 0,
+    "bvk_identity": 1e-10,
+    "bvk_bound": 1e-09
+  },
+  "lsorbit": true,
+  "potcar_available": false,
+  "paw_correction_note": "skipped: no POTCAR for this material",
+  "representative_kpoints": [
+    1,
+    30,
+    36,
+    60
+  ],
+  "max_fractional_bands_at_any_k": 3,
+  "kpoints": [
+    {
+      "ik": 1,
+      "k_frac": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "n_occupied": 68,
+      "n_binary": 68,
+      "n_fractional": 0,
+      "halved": false,
+      "gram_raw": {
+        "nb": 68,
+        "max_diag_err": 0.8071330067469213,
+        "max_offdiag": 0.07450564302099102,
+        "herm_err": 1.8174242708653231e-16,
+        "eig_min": 0.15857073871070046,
+        "eig_max": 1.3256599540107432,
+        "norm_G_minus_I": 0.8414292612892996,
+        "tol": 0.0001,
+        "passed": false
+      },
+      "gram_norm_true": {
+        "nb": 68,
+        "max_diag_err": 1.7763568394002505e-15,
+        "max_offdiag": 0.2076903777716046,
+        "herm_err": 3.433175098891678e-16,
+        "eig_min": 0.6578397449952292,
+        "eig_max": 1.458330132567763,
+        "norm_G_minus_I": 0.4583301325677617,
+        "tol": 0.0001,
+        "passed": false
+      },
+      "gram_raw_binary_subset": {
+        "nb": 68,
+        "max_diag_err": 0.8071330067469213,
+        "max_offdiag": 0.07450564302099102,
+        "herm_err": 1.8174242708653231e-16,
+        "eig_min": 0.15857073871070046,
+        "eig_max": 1.3256599540107432,
+        "norm_G_minus_I": 0.8414292612892996,
+        "tol": 0.0001,
+        "passed": false,
+        "n": 68
+      },
+      "gram_raw_fractional_subset": {
+        "n": 0
+      },
+      "status": "OK"
+    },
+    {
+      "ik": 30,
+      "k_frac": [
+        0.111111111111,
+        0.111111111111,
+        0.25
+      ],
+      "n_occupied": 68,
+      "n_binary": 68,
+      "n_fractional": 0,
+      "halved": false,
+      "gram_raw": {
+        "nb": 68,
+        "max_diag_err": 0.8073065158831538,
+        "max_offdiag": 0.13890656876436547,
+        "herm_err": 3.908020529499657e-16,
+        "eig_min": 0.16101632194806226,
+        "eig_max": 1.2811810919527498,
+        "norm_G_minus_I": 0.838983678051938,
+        "tol": 0.0001,
+        "passed": false
+      },
+      "gram_norm_true": {
+        "nb": 68,
+        "max_diag_err": 1.1102230246251565e-15,
+        "max_offdiag": 0.19132071031196474,
+        "herm_err": 3.3887102699122705e-16,
+        "eig_min": 0.5485599398623976,
+        "eig_max": 1.7880678580429188,
+        "norm_G_minus_I": 0.7880678580429187,
+        "tol": 0.0001,
+        "passed": false
+      },
+      "gram_raw_binary_subset": {
+        "nb": 68,
+        "max_diag_err": 0.8073065158831538,
+        "max_offdiag": 0.13890656876436547,
+        "herm_err": 3.908020529499657e-16,
+        "eig_min": 0.16101632194806226,
+        "eig_max": 1.2811810919527498,
+        "norm_G_minus_I": 0.838983678051938,
+        "tol": 0.0001,
+        "passed": false,
+        "n": 68
+      },
+      "gram_raw_fractional_subset": {
+        "n": 0
+      },
+      "status": "OK"
+    },
+    {
+      "ik": 36,
+      "k_frac": [
+        0.333333333333,
+        0.333333333333,
+        0.25
+      ],
+      "n_occupied": 70,
+      "n_binary": 67,
+      "n_fractional": 3,
+      "halved": false,
+      "gram_raw": {
+        "nb": 70,
+        "max_diag_err": 0.807725864932656,
+        "max_offdiag": 0.22126607144807126,
+        "herm_err": 3.2960773166455494e-16,
+        "eig_min": 0.16311637207392338,
+        "eig_max": 1.2708213877101038,
+        "norm_G_minus_I": 0.8368836279260766,
+        "tol": 0.0001,
+        "passed": false
+      },
+      "gram_norm_true": {
+        "nb": 70,
+        "max_diag_err": 1.2212453270876722e-15,
+        "max_offdiag": 0.34725078875288784,
+        "herm_err": 3.510833468576701e-16,
+        "eig_min": 0.5345106029478277,
+        "eig_max": 1.8701359999224256,
+        "norm_G_minus_I": 0.8701359999224265,
+        "tol": 0.0001,
+        "passed": false
+      },
+      "gram_raw_binary_subset": {
+        "nb": 67,
+        "max_diag_err": 0.807725864932656,
+        "max_offdiag": 0.2027113520178381,
+        "herm_err": 3.2960773166455494e-16,
+        "eig_min": 0.16321783038998688,
+        "eig_max": 1.269142954862552,
+        "norm_G_minus_I": 0.8367821696100132,
+        "tol": 0.0001,
+        "passed": false,
+        "n": 67
+      },
+      "gram_raw_fractional_subset": {
+        "nb": 3,
+        "max_diag_err": 0.5923538738949701,
+        "max_offdiag": 0.006099331673787647,
+        "herm_err": 5.76648802964689e-17,
+        "eig_min": 0.40540868743081093,
+        "eig_max": 0.4248000282135717,
+        "norm_G_minus_I": 0.5945913125691891,
+        "tol": 0.0001,
+        "passed": false,
+        "n": 3
+      },
+      "status": "OK"
+    },
+    {
+      "ik": 60,
+      "k_frac": [
+        0.333333333333,
+        0.333333333333,
+        0.5
+      ],
+      "n_occupied": 72,
+      "n_binary": 72,
+      "n_fractional": 0,
+      "halved": false,
+      "gram_raw": {
+        "nb": 72,
+        "max_diag_err": 0.8078891977355009,
+        "max_offdiag": 0.18746250970800646,
+        "herm_err": 5.690316088760833e-16,
+        "eig_min": 0.16411041728849649,
+        "eig_max": 1.292844761257574,
+        "norm_G_minus_I": 0.8358895827115036,
+        "tol": 0.0001,
+        "passed": false
+      },
+      "gram_norm_true": {
+        "nb": 72,
+        "max_diag_err": 1.5543122344752192e-15,
+        "max_offdiag": 0.28832415105509174,
+        "herm_err": 3.992917448111643e-16,
+        "eig_min": 0.6174937406801632,
+        "eig_max": 1.5304979134259276,
+        "norm_G_minus_I": 0.5304979134259276,
+        "tol": 0.0001,
+        "passed": false
+      },
+      "gram_raw_binary_subset": {
+        "nb": 72,
+        "max_diag_err": 0.8078891977355009,
+        "max_offdiag": 0.18746250970800646,
+        "herm_err": 5.690316088760833e-16,
+        "eig_min": 0.16411041728849649,
+        "eig_max": 1.292844761257574,
+        "norm_G_minus_I": 0.8358895827115036,
+        "tol": 0.0001,
+        "passed": false,
+        "n": 72
+      },
+      "gram_raw_fractional_subset": {
+        "n": 0
+      },
+      "status": "OK"
+    }
+  ],
+  "status": "SKIPPED"
+}

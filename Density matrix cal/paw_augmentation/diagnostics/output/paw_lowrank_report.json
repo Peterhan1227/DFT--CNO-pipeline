@@ -1,0 +1,135 @@
+{
+  "material": "WSe2_mono",
+  "output_subdir": "W_center_2",
+  "nstates": 4212,
+  "n_proj_total": 44,
+  "Nr": 8833,
+  "ngrid": [
+    11,
+    11,
+    73
+  ],
+  "halving_triggered": false,
+  "validation": {
+    "kpoints": [
+      1,
+      163
+    ],
+    "n_states": 26,
+    "max_abs_diff": 7.549961713005333e-05,
+    "max_abs_diff_all_entries": 7.549961713005333e-05,
+    "max_abs_diff_samek_block": 7.549961713005333e-05,
+    "max_abs_diff_crossk_block": 7.53469464611678e-05,
+    "n_reference_unconverged_entries": 0,
+    "max_abs_diff_reference_unconverged_entries": 0.0,
+    "reference_instability_tol": 0.0005,
+    "tol": 0.0005,
+    "lowrank_block_stats": {
+      "diag_min": 0.9999970651651111,
+      "diag_max": 1.0000015733511387,
+      "max_offdiag": 0.9999598547231845,
+      "herm_err": 4.443059973708341e-16
+    },
+    "reference_3x_block_stats": {
+      "diag_min": 0.999979017501465,
+      "diag_max": 1.0000354371950058,
+      "max_offdiag": 0.999995112738717,
+      "herm_err": 4.443059973708341e-16
+    },
+    "elapsed_s": 7.05124831199646,
+    "per_atom_augmentation_convergence": [
+      {
+        "iatom": 0,
+        "element": "W_sv",
+        "lmmax": 18,
+        "max_abs_diff": 7.550326590259475e-05,
+        "max_abs_diff_samek": 7.550326590259475e-05,
+        "max_abs_diff_crossk": 7.54329661436028e-05,
+        "passed": true
+      },
+      {
+        "iatom": 1,
+        "element": "Se",
+        "lmmax": 13,
+        "max_abs_diff": 2.6645536926050983e-06,
+        "max_abs_diff_samek": 2.6645536926050983e-06,
+        "max_abs_diff_crossk": 2.074471015122462e-06,
+        "passed": true
+      },
+      {
+        "iatom": 2,
+        "element": "Se",
+        "lmmax": 13,
+        "max_abs_diff": 2.6645536310987428e-06,
+        "max_abs_diff_samek": 2.6645536310987428e-06,
+        "max_abs_diff_crossk": 2.074471135997634e-06,
+        "passed": true
+      }
+    ],
+    "passed": true,
+    "per_atom_passed": true
+  },
+  "herm_err_G": 1.3334236103572998e-15,
+  "herm_err_K_pre_symmetrization": 4.3422263169012155e-18,
+  "diag_G_range": [
+    0.9999970651651111,
+    1.000002941802811
+  ],
+  "trace_expected_input": 13.000000000000695,
+  "trace_K": 13.000002980225048,
+  "sum_cno_occupations": 13.000002980225041,
+  "trace_K_minus_eigensum": 7.105427357601002e-15,
+  "trace_K_minus_expected": 2.980224353521521e-06,
+  "trace_relative_error": 2.292480271939509e-07,
+  "occupation_mode": "occ_threshold",
+  "trace_convention": "occ_threshold selection; occupations never exceeded 1.5 in this dataset (halving branch a no-op). trace_expected_input is the expected occupied-spatial-orbital count per WS cell, not a spin-summed electron count.",
+  "top_20_occupations": [
+    0.9999875760845918,
+    0.9999706684661817,
+    0.9996365570382746,
+    0.9995609842614442,
+    0.976407394510444,
+    0.9537509170283198,
+    0.946925898766567,
+    0.8762510424948482,
+    0.7575754557784006,
+    0.6996892815319795,
+    0.5052469364209322,
+    0.48935969598485873,
+    0.4614383827409652,
+    0.42454223293354243,
+    0.35635365774152894,
+    0.3130106771453961,
+    0.28936641568391214,
+    0.23757055099726368,
+    0.19784271492124172,
+    0.16767238451039093
+  ],
+  "max_eigval": 0.9999875760845918,
+  "min_eigval": -0.1995188390401127,
+  "n_eigval_gt_1e6": 97,
+  "n_out_of_bounds": 2,
+  "bound_01_tol": 0.001,
+  "n_selected_orbitals_reconstructed": 97,
+  "state_space_orthonormality_err": 1.379246149333013e-11,
+  "checks": {
+    "validation_gate_passed": true,
+    "G_hermitian": true,
+    "K_hermitian": true,
+    "G_diag_paw_norms_close_to_1": true,
+    "K_positive_semidefinite": false,
+    "occupations_within_01_bound": false,
+    "trace_algebra_check": true,
+    "state_space_orthonormality": true
+  },
+  "overall_status": "FAIL",
+  "timing_s": {
+    "build_psi_beta": 11.338021278381348,
+    "gram_matmul": 4.552275896072388,
+    "eigh": 44.32731509208679,
+    "total": 67.47481870651245
+  },
+  "peak_memory_MB": 2305.88014,
+  "deferred_issue": "This experiment still uses the present PAW cell-overlap model (build_real_space_S's S definition, replicated here via reciprocal-space betas and validated against a 3x real-space reference for representative blocks). A later task will separately examine the exact regional operator T^dagger P_A T -- that scope is NOT expanded here.",
+  "note": "Never built an Nr x Nr S or D matrix, never built a 2x/3x production grid, never globally rescaled S, never clipped occupations. main.py and config.py were not modified (config.py only read)."
+}

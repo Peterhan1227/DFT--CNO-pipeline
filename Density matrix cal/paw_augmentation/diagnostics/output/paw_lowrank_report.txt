@@ -1,0 +1,87 @@
+=== Low-rank PAW-corrected CNO report ===
+
+gate_status: PASSED (validation + full build ran)
+
+material: WSe2_mono  output_subdir: W_center_2
+nstates: 4212  n_proj_total: 44  Nr: 8833  ngrid: [11, 11, 73]
+
+--- representative block validation (vs converged 3x real-space reference) ---
+kpoints: [1, 163]  n_states: 26
+Reference self-convergence check (3x vs 2x, per entry): 0 of 676 entries still change by >= 5.0e-04 between 2x and 3x -- these are EXCLUDED from the pass/fail decision below (the 3x reference itself is not trustworthy for them, so disagreement there does not indicate a lowrank-method error); max disagreement among them: 0.0000e+00 (reported, not gating).
+max|G_lowrank-G_3x| (reference-converged entries only): 7.5500e-05  tol: 5.0e-04
+  same-k sub-block : 7.5500e-05
+  cross-k sub-block: 7.5347e-05
+[for reference only, not gating: max|G_lowrank-G_3x| over ALL entries (including reference-unconverged) = 7.5500e-05]
+per-atom augmentation convergence (not just the atom-summed total; reference-converged entries only):
+  atom 0 (W_sv, lmmax=18): max|diff|=7.5503e-05  (same-k=7.5503e-05, cross-k=7.5433e-05)  OK
+  atom 1 (Se, lmmax=13): max|diff|=2.6646e-06  (same-k=2.6646e-06, cross-k=2.0745e-06)  OK
+  atom 2 (Se, lmmax=13): max|diff|=2.6646e-06  (same-k=2.6646e-06, cross-k=2.0745e-06)  OK
+per_atom_passed: True
+validation passed: True
+
+--- Hermiticity / PAW-norm / PSD / bound checks ---
+herm_err_G (pre-symmetrization): 1.3334e-15
+herm_err_K (pre-symmetrization): 4.3422e-18
+diag(G) range: [0.999997, 1.000003]  (PAW norms close to 1: True)
+K min eigenvalue: -0.199519  (PSD within tol: False)
+n_eigval_outside_[0,1]_by_gt_1e-03: 2  (passed: False)
+state-space orthonormality of reconstructed CNOs (max|Y^H G Y - I|): 1.3792e-11
+
+--- trace reporting ---
+trace_K == sum(eigenvalues) is only the algebra/eigensolver check.
+trace_K == trace_expected_input is the physical normalization check.
+
+trace_expected_input   = 13.0000000000
+trace_K                = 13.0000029802
+sum_cno_occupations    = 13.0000029802
+trace_K_minus_eigensum = 7.1054e-15  (algebra check)
+trace_K_minus_expected = 2.9802e-06  (physical check)
+trace_relative_error   = 2.2925e-07
+trace_convention: occ_threshold selection; occupations never exceeded 1.5 in this dataset (halving branch a no-op). trace_expected_input is the expected occupied-spatial-orbital count per WS cell, not a spin-summed electron count.
+occupation_mode: occ_threshold
+
+--- CNO spectrum ---
+max_eigval: 0.99998758  min_eigval: -0.19951884  N(>1e-6): 97
+top_20_cno_occupations:
+  CNO   0 : 9.9998757608e-01
+  CNO   1 : 9.9997066847e-01
+  CNO   2 : 9.9963655704e-01
+  CNO   3 : 9.9956098426e-01
+  CNO   4 : 9.7640739451e-01
+  CNO   5 : 9.5375091703e-01
+  CNO   6 : 9.4692589877e-01
+  CNO   7 : 8.7625104249e-01
+  CNO   8 : 7.5757545578e-01
+  CNO   9 : 6.9968928153e-01
+  CNO  10 : 5.0524693642e-01
+  CNO  11 : 4.8935969598e-01
+  CNO  12 : 4.6143838274e-01
+  CNO  13 : 4.2454223293e-01
+  CNO  14 : 3.5635365774e-01
+  CNO  15 : 3.1301067715e-01
+  CNO  16 : 2.8936641568e-01
+  CNO  17 : 2.3757055100e-01
+  CNO  18 : 1.9784271492e-01
+  CNO  19 : 1.6767238451e-01
+
+n_selected_orbitals_reconstructed (lambda_i > 1e-6): 97
+
+--- validation summary ---
+  validation_gate_passed           OK
+  G_hermitian                      OK
+  K_hermitian                      OK
+  G_diag_paw_norms_close_to_1      OK
+  K_positive_semidefinite          FAIL
+  occupations_within_01_bound      FAIL
+  trace_algebra_check              OK
+  state_space_orthonormality       OK
+  OVERALL: FAIL
+
+--- performance ---
+total_runtime_s: 67.5
+peak_traced_memory_MB: 2305.9
+
+--- deferred (not expanded here) ---
+This experiment still uses the present PAW cell-overlap model (build_real_space_S's S definition, replicated here via reciprocal-space betas and validated against a 3x real-space reference for representative blocks). A later task will separately examine the exact regional operator T^dagger P_A T -- that scope is NOT expanded here.
+
+Never built an Nr x Nr S or D matrix, never built a 2x/3x production grid, never globally rescaled S, never clipped occupations. main.py and config.py were not modified (config.py only read).

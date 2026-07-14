@@ -1,0 +1,62 @@
+NOTE (kept for the record, not the reported result): this is the console
+log from the FIRST version of quadrature_convergence_check.py's
+real_space_beta_for_bands(), which omitted the Bloch phase entirely (used
+bare u_n(r) instead of psi_n(r), and no per-atom-image translation phase).
+That bug happens to vanish exactly at Gamma (k=0), which is why ik=1 alone
+converges cleanly below while ik=163 and ik=324 (both non-Gamma) plateau
+and do not improve with grid refinement -- the signature of a missing
+k-phase, not of quadrature. See the module docstring's "Real-space beta
+derivation" section and RESULTS.md's dated entry for the fix and the
+corrected re-run (quadrature_convergence_report.txt / .json), which is the
+actual reported result.
+=========================================================================
+
+=== Real-space quadrature convergence check: WSe2_mono ===
+
+native grid: (11, 11, 73)   representative k-points: [1, 163, 324]
+
+ik=   1  k_frac=[0.0, 0.0, 0.0]  nbands=13  reciprocal reference: max_offdiag=5.402e-06  diag=[1.00000,1.00000]
+ik= 163  k_frac=[0.0, 0.5, 0.0]  nbands=13  reciprocal reference: max_offdiag=9.148e-07  diag=[1.00000,1.00000]
+ik= 324  k_frac=[-0.0556, -0.0556, 0.0]  nbands=13  reciprocal reference: max_offdiag=3.236e-06  diag=[1.00000,1.00000]
+
+--- grid factor 1x: (11,11,73)  Nr=8833 ---
+  WS map + primitive grid built in 0.2s
+  ik=   1  +0.0s  beta_diff: prim(max=3.781e-01, rms=2.677e-02)  ws(max=3.781e-01, rms=2.677e-02)
+            gram: prim(offdiag=1.906e-03, diag=[0.9991,1.0057])  ws(offdiag=1.906e-03, diag=[0.9991,1.0057])
+  ik= 163  +0.0s  beta_diff: prim(max=5.570e+00, rms=7.497e-01)  ws(max=5.570e+00, rms=7.497e-01)
+            gram: prim(offdiag=5.390e-01, diag=[0.9894,1.3310])  ws(offdiag=5.390e-01, diag=[0.9894,1.3310])
+  ik= 324  +0.0s  beta_diff: prim(max=9.793e-01, rms=1.308e-01)  ws(max=9.793e-01, rms=1.308e-01)
+            gram: prim(offdiag=1.077e-01, diag=[0.9994,1.0117])  ws(offdiag=1.077e-01, diag=[0.9994,1.0117])
+
+--- grid factor 2x: (22,22,146)  Nr=70664 ---
+  WS map + primitive grid built in 1.4s
+  ik=   1  +0.7s  beta_diff: prim(max=8.066e-03, rms=7.369e-04)  ws(max=8.066e-03, rms=7.369e-04)
+            gram: prim(offdiag=1.368e-04, diag=[0.9999,1.0001])  ws(offdiag=1.368e-04, diag=[0.9999,1.0001])
+  ik= 163  +0.7s  beta_diff: prim(max=5.580e+00, rms=7.486e-01)  ws(max=5.580e+00, rms=7.486e-01)
+            gram: prim(offdiag=5.385e-01, diag=[0.9876,1.3317])  ws(offdiag=5.385e-01, diag=[0.9876,1.3317])
+  ik= 324  +0.7s  beta_diff: prim(max=9.603e-01, rms=1.274e-01)  ws(max=9.603e-01, rms=1.274e-01)
+            gram: prim(offdiag=1.076e-01, diag=[0.9990,1.0127])  ws(offdiag=1.076e-01, diag=[0.9990,1.0127])
+
+--- grid factor 3x: (33,33,219)  Nr=238491 ---
+  WS map + primitive grid built in 4.7s
+  ik=   1  +2.8s  beta_diff: prim(max=8.987e-04, rms=1.221e-04)  ws(max=8.987e-04, rms=1.221e-04)
+            gram: prim(offdiag=7.023e-05, diag=[1.0000,1.0000])  ws(offdiag=7.023e-05, diag=[1.0000,1.0000])
+  ik= 163  +2.7s  beta_diff: prim(max=5.579e+00, rms=7.486e-01)  ws(max=5.579e+00, rms=7.486e-01)
+            gram: prim(offdiag=5.385e-01, diag=[0.9877,1.3317])  ws(offdiag=5.385e-01, diag=[0.9877,1.3317])
+  ik= 324  +2.8s  beta_diff: prim(max=9.605e-01, rms=1.274e-01)  ws(max=9.605e-01, rms=1.274e-01)
+            gram: prim(offdiag=1.076e-01, diag=[0.9989,1.0126])  ws(offdiag=1.076e-01, diag=[0.9989,1.0126])
+
+--- convergence summary (worst case over k-points) ---
+  f=1x  gram_prim_offdiag=5.390e-01  gram_ws_offdiag=5.390e-01  reciprocal_ref=5.402e-06
+  f=2x  gram_prim_offdiag=5.385e-01  gram_ws_offdiag=5.385e-01  reciprocal_ref=5.402e-06
+  f=3x  gram_prim_offdiag=5.385e-01  gram_ws_offdiag=5.385e-01  reciprocal_ref=5.402e-06
+  prim shrink (1x->3x): 1.00x  (converging=False)
+  ws   shrink (1x->3x): 1.00x  (converging=False)
+
+DIAGNOSIS: inconclusive_check_normalization
+RECOMMENDATION: Neither the primitive-cell nor the WS-mapped real-space result converges toward the reciprocal-space reference with grid refinement. This points at a normalization or formula issue in build_real_space_S / the beta convention (not simple quadrature undersampling), which refining the grid cannot fix. Do NOT choose between the reciprocal-space rebuild or a WS-targeted fix yet -- re-examine the real-space S formula and normalization factors first.
+
+Total runtime: 17.0s
+
+Saved -> C:\Users\hanziruopeter\OneDrive\Personal files\Academic\Physics\Research\Columbia Raquel\Density matrix cal\paw_augmentation\output\quadrature_convergence_report.json
+Saved -> C:\Users\hanziruopeter\OneDrive\Personal files\Academic\Physics\Research\Columbia Raquel\Density matrix cal\paw_augmentation\output\quadrature_convergence_report.txt

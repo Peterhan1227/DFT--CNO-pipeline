@@ -1,0 +1,168 @@
+{
+  "material": "CoSn",
+  "data_dir": "C:\\Users\\hanziruopeter\\OneDrive\\Personal files\\Academic\\Physics\\Research\\Columbia Raquel\\Density matrix cal\\Data\\CoSn",
+  "tol": {
+    "lattice_ang": 0.0001,
+    "kfrac": 1e-06,
+    "energy_ev": 0.001,
+    "occupation": 1e-06,
+    "gram_corrected": 0.0001,
+    "fft_roundtrip": 1e-09,
+    "direct_fourier": 1e-08,
+    "bloch_covariance": 1e-08,
+    "ws_permutation": 0,
+    "bvk_identity": 1e-10,
+    "bvk_bound": 1e-09
+  },
+  "lsorbit": true,
+  "ws_permutation": {
+    "Nr": 3757,
+    "n_unique_base_indices": 3757,
+    "passed": true
+  },
+  "representative_kpoints": [
+    1,
+    30,
+    36,
+    60
+  ],
+  "kpoints": [
+    {
+      "ik": 1,
+      "k_frac": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "duplicate_grid_indices": {
+        "nG": 1169,
+        "n_unique": 1169,
+        "n_duplicates": 0
+      },
+      "fft_roundtrip_max_err": 1.1123893155135927e-16,
+      "fft_roundtrip_passed": true,
+      "gram_agreement": {
+        "coef_vs_primitive_u": 1.0129834521696388e-15,
+        "primitive_u_vs_primitive_psi": 0.0,
+        "primitive_psi_vs_ws_psi": 0.0,
+        "tol": 1e-09,
+        "passed": true
+      },
+      "bloch_translation_covariance": {
+        "max_err": 0.0,
+        "tol": 1e-08,
+        "passed": true
+      },
+      "direct_fourier_agreement": {
+        "n_bands_checked": 4,
+        "max_err": 8.72377931052115e-17,
+        "tol": 1e-08,
+        "passed": true
+      },
+      "status": "OK"
+    },
+    {
+      "ik": 30,
+      "k_frac": [
+        0.111111111111,
+        0.111111111111,
+        0.25
+      ],
+      "duplicate_grid_indices": {
+        "nG": 1179,
+        "n_unique": 1179,
+        "n_duplicates": 0
+      },
+      "fft_roundtrip_max_err": 1.2412670766236366e-16,
+      "fft_roundtrip_passed": true,
+      "gram_agreement": {
+        "coef_vs_primitive_u": 8.881784197001252e-16,
+        "primitive_u_vs_primitive_psi": 4.440956919707312e-16,
+        "primitive_psi_vs_ws_psi": 4.440898290098087e-16,
+        "tol": 1e-09,
+        "passed": true
+      },
+      "bloch_translation_covariance": {
+        "max_err": 3.469446951953614e-17,
+        "tol": 1e-08,
+        "passed": true
+      },
+      "direct_fourier_agreement": {
+        "n_bands_checked": 4,
+        "max_err": 1.0747238460009962e-16,
+        "tol": 1e-08,
+        "passed": true
+      },
+      "status": "OK"
+    },
+    {
+      "ik": 36,
+      "k_frac": [
+        0.333333333333,
+        0.333333333333,
+        0.25
+      ],
+      "duplicate_grid_indices": {
+        "nG": 1164,
+        "n_unique": 1164,
+        "n_duplicates": 0
+      },
+      "fft_roundtrip_max_err": 8.777083671441753e-17,
+      "fft_roundtrip_passed": true,
+      "gram_agreement": {
+        "coef_vs_primitive_u": 6.661338147750939e-16,
+        "primitive_u_vs_primitive_psi": 6.661342565831851e-16,
+        "primitive_psi_vs_ws_psi": 4.47545209131181e-16,
+        "tol": 1e-09,
+        "passed": true
+      },
+      "bloch_translation_covariance": {
+        "max_err": 1.0569008315563939e-16,
+        "tol": 1e-08,
+        "passed": true
+      },
+      "direct_fourier_agreement": {
+        "n_bands_checked": 4,
+        "max_err": 1.1643341981219687e-16,
+        "tol": 1e-08,
+        "passed": true
+      },
+      "status": "OK"
+    },
+    {
+      "ik": 60,
+      "k_frac": [
+        0.333333333333,
+        0.333333333333,
+        0.5
+      ],
+      "duplicate_grid_indices": {
+        "nG": 1188,
+        "n_unique": 1188,
+        "n_duplicates": 0
+      },
+      "fft_roundtrip_max_err": 1.1188630228279524e-16,
+      "fft_roundtrip_passed": true,
+      "gram_agreement": {
+        "coef_vs_primitive_u": 1.1102400944141533e-15,
+        "primitive_u_vs_primitive_psi": 6.661354152724397e-16,
+        "primitive_psi_vs_ws_psi": 4.440898405988933e-16,
+        "tol": 1e-09,
+        "passed": true
+      },
+      "bloch_translation_covariance": {
+        "max_err": 1.2412670766236366e-16,
+        "tol": 1e-08,
+        "passed": true
+      },
+      "direct_fourier_agreement": {
+        "n_bands_checked": 4,
+        "max_err": 1.2836953722228372e-16,
+        "tol": 1e-08,
+        "passed": true
+      },
+      "status": "OK"
+    }
+  ],
+  "status": "PASS"
+}

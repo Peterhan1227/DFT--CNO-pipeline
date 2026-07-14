@@ -1,0 +1,127 @@
+=== PAW-corrected CNO density matrix report ===
+
+gate_status: PASSED (preflight) -- full computation ran
+
+Correct PAW-CNO occupations are eigenvalues of S^(1/2) D S^(1/2)
+(equivalently of D @ S), NOT of the generalized problem
+D v = lambda S v -- see module docstring / solve_paw_cno() for
+the derivation.
+
+material: WSe2_mono  output_subdir: W_center_2
+data_dir: C:\Users\hanziruopeter\OneDrive\Personal files\Academic\Physics\Research\Columbia Raquel\Density matrix cal\Data\WSe2_mono
+ws_center: [0.3333333333333333, 0.6666666666666666, 0.5] (fractional) -> [0.0, 1.9167641752, 12.5] Ang
+grid: (11,11,73)  Nr=8833
+n_atom_images_in_S: 7
+
+--- preflight reciprocal-space PAW overlap check ---
+kpoints_checked: [1, 81, 162, 243, 324]
+soft_potential_tol: 1.0e-04  min_improvement_factor: 10.0  corrected_abs_tol: 1.0e-03
+  ik=   1  nbands= 13  uncorrected=1.4094e-01  corrected=5.4015e-06  OK (improvement=26092.76x, corrected=5.402e-06)
+  ik=  81  nbands= 13  uncorrected=1.3611e-01  corrected=6.8576e-07  OK (improvement=198478.75x, corrected=6.858e-07)
+  ik= 162  nbands= 13  uncorrected=1.3070e-01  corrected=4.7224e-07  OK (improvement=276761.71x, corrected=4.722e-07)
+  ik= 243  nbands= 13  uncorrected=1.2529e-01  corrected=6.1133e-07  OK (improvement=204951.98x, corrected=6.113e-07)
+  ik= 324  nbands= 13  uncorrected=1.3821e-01  corrected=3.2364e-06  OK (improvement=42706.45x, corrected=3.236e-06)
+preflight passed: True
+
+--- Hermiticity / metric validity ---
+herm_err_S (pre-symmetrization): 3.9573e-14
+herm_err_D (pre-symmetrization): 5.2042e-18
+herm_err_M (pre-symmetrization): 6.9389e-17
+min_s_eval: 5.239914e-01   S_positive_definite: True
+S-metric orthonormality error of returned eigenvectors (max|X^H S X - I|): 4.6629e-15   passed: True
+
+--- occupation bound ---
+min_eigval: -0.00000000
+max_eigval: 1.00295901
+n_eigval_outside_[0,1]_by_gt_1e-03: 1   passed: False
+
+--- trace reporting ---
+Definitions:
+  trace_raw_D              = Re Tr(D) -- RAW PSEUDO-COEFFICIENT trace only;
+                              this is NOT the physical particle number.
+  trace_paw_M              = Re Tr(M) -- the PAW-corrected matrix trace,
+                              M = S^(1/2) D S^(1/2).
+  trace_DS                 = Re Tr(D @ S); must equal trace_paw_M.
+  sum_paw_cno_occupations  = eigvals.sum(); must equal both traces above.
+  trace_expected_input     = sum_k w_k * sum_n f_nk, computed inside
+                              build_density_matrix using the exact same
+                              band-selection/per-spin occupation convention
+                              used to build D.
+  trace_M_minus_eigensum, trace_DS_minus_eigensum:
+                              ALGEBRA/EIGENSOLVER self-consistency checks only
+                              (matrix trace vs. its own eigenvalue sum) -- these
+                              being ~0 does not by itself validate the physics.
+  trace_paw_minus_expected, trace_relative_error:
+                              the INDEPENDENT PHYSICAL NORMALIZATION check --
+                              corrected matrix trace vs. the expected occupied
+                              count computed directly from the input occupation
+                              numbers, entirely independent of the eigensolver.
+  trace_convention          = occ_threshold selection; occupations in this dataset never exceeded 1.5, so the >1.5 halving branch was a no-op -- occupations were already stored per-spin-orbital. trace_expected_input is the expected occupied-spatial-orbital count per WS cell under that as-stored per-spin convention, still not a spin-summed electron count.
+  occupation_mode           = occ_threshold
+
+trace_raw_D               = 11.9940998117
+trace_paw_M               = 13.5178774247
+trace_DS                  = 13.5178774247
+sum_paw_cno_occupations   = 13.5178774247
+trace_expected_input      = 13.0000000000
+trace_M_minus_eigensum    = 8.8818e-15
+trace_DS_minus_eigensum   = 1.2434e-14
+trace_paw_minus_expected  = 5.1788e-01
+trace_relative_error      = 3.9837e-02
+
+--- validation summary ---
+  preflight_passed                 OK
+  S_hermitian                      OK
+  S_positive_definite              OK
+  D_hermitian                      OK
+  M_hermitian                      OK
+  eigenvectors_S_orthonormal       OK
+  occupations_within_01_bound      FAIL
+  trace_M_eq_DS_eq_eigensum        OK
+  OVERALL: FAIL
+
+uncorrected (same-data, plain eigh(D), no S) max_eigval: 1.08774614
+uncorrected top_20: [1.087746, 0.954872, 0.908097, 0.865514, 0.860406, 0.859601, 0.804889, 0.473535, 0.46912, 0.462659, 0.446621, 0.440374, 0.427367, 0.403559, 0.366496, 0.294172, 0.287881, 0.252002, 0.232705, 0.1774]
+
+top_20_corrected_cno_occupations:
+  CNO   0 : 1.0029590106e+00
+  CNO   1 : 1.0004221903e+00
+  CNO   2 : 1.0003394746e+00
+  CNO   3 : 9.9911623045e-01
+  CNO   4 : 9.2895859758e-01
+  CNO   5 : 8.7146391687e-01
+  CNO   6 : 8.5919679156e-01
+  CNO   7 : 8.3548390723e-01
+  CNO   8 : 7.7967205022e-01
+  CNO   9 : 7.5105332087e-01
+  CNO  10 : 5.0903253781e-01
+  CNO  11 : 4.8441680004e-01
+  CNO  12 : 4.6716086103e-01
+  CNO  13 : 3.9647379658e-01
+  CNO  14 : 3.7098031854e-01
+  CNO  15 : 3.1021381767e-01
+  CNO  16 : 3.0826362889e-01
+  CNO  17 : 2.9229749535e-01
+  CNO  18 : 2.6953490862e-01
+  CNO  19 : 1.7257245122e-01
+
+cno_orbitals_corrected.npy: eigenvectors of D @ S (S-metric orthonormal, X^H S X = I) -- NOT the plain X^H X = I convention main.py's cno_orbitals.npy uses.
+
+--- future work (not resolved here) ---
+- Real-space quadrature convergence of build_real_space_S has not been
+  systematically checked against grid density (see RESULTS.md's
+  _test_beta_consistency.py note on 'a few %' residual disagreement,
+  attributed to but not rigorously isolated as quadrature error).
+- The exact regional projector T^dagger P_A T (restricting the FULL PAW
+  operator, not just its plane-wave part, to the WS cell) is not
+  implemented -- build_real_space_S evaluates the augmentation term at
+  actual (possibly WS-unwrapped) Cartesian coordinates but does not
+  separately verify this equals the theoretically exact regional
+  restriction operator.
+- SOC (LSORBIT=True) and Fermi-window occupation mode are both detected
+  and cause a clean BLOCKED abort (see module docstring) -- neither is
+  implemented in build_density_matrix.
+
+[DEBUG ONLY -- INCORRECT / inverse-metric test, NOT the physical result] generalized eigh(D, S) (D v = lambda S v):
+  top_20: [1.640492, 1.107412, 1.0356, 1.026886, 0.978855, 0.928503, 0.887395, 0.507446, 0.495538, 0.470921, 0.449278, 0.422846, 0.416932, 0.4165, 0.371601, 0.29565, 0.281105, 0.235302, 0.21636, 0.182794]
+  max=1.64049219  sum=13.31200971

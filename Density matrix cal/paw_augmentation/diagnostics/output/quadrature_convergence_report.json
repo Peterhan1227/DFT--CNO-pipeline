@@ -1,0 +1,425 @@
+{
+  "material": "WSe2_mono",
+  "data_dir": "C:\\Users\\hanziruopeter\\OneDrive\\Personal files\\Academic\\Physics\\Research\\Columbia Raquel\\Density matrix cal\\Data\\WSe2_mono",
+  "native_grid": [
+    11,
+    11,
+    73
+  ],
+  "grid_factors": [
+    1,
+    2,
+    3
+  ],
+  "kpoints": [
+    1,
+    163,
+    324
+  ],
+  "ws_center": [
+    0.3333333333333333,
+    0.6666666666666666,
+    0.5
+  ],
+  "ws_center_coord_type": "fractional",
+  "ws_translation_search_range_nmax": 4,
+  "thresholds": {
+    "convergence_shrink_factor": 3.0,
+    "close_to_recip_multiple": 100.0,
+    "close_to_recip_abs_floor": 0.001
+  },
+  "per_kpoint_reciprocal_reference": {
+    "1": {
+      "diag_mean": 0.9999995993846571,
+      "diag_min": 0.9999970651651121,
+      "diag_max": 1.0000004590671936,
+      "max_offdiag": 5.40154084921055e-06
+    },
+    "163": {
+      "diag_mean": 1.0000002817415727,
+      "diag_min": 0.9999998434147177,
+      "diag_max": 1.0000015733511387,
+      "max_offdiag": 9.147967682664781e-07
+    },
+    "324": {
+      "diag_mean": 0.9999998646623851,
+      "diag_min": 0.9999974335163678,
+      "diag_max": 1.0000006149522611,
+      "max_offdiag": 3.2363925115166936e-06
+    }
+  },
+  "results": [
+    {
+      "ik": 1,
+      "grid_factor": 1,
+      "ngrid": [
+        11,
+        11,
+        73
+      ],
+      "Nr": 8833,
+      "nbands": 13,
+      "elapsed_s": 0.04783487319946289,
+      "beta_diff_prim": {
+        "max_abs": 0.3780592436244426,
+        "rms": 0.02677336196808641
+      },
+      "beta_diff_ws": {
+        "max_abs": 0.3780592436244427,
+        "rms": 0.026773361968086416
+      },
+      "gram_prim": {
+        "diag_mean": 1.0008795891500126,
+        "diag_min": 0.9991148400836174,
+        "diag_max": 1.0057052203723837,
+        "max_offdiag": 0.0019064245703291052
+      },
+      "gram_ws": {
+        "diag_mean": 1.0008795891500126,
+        "diag_min": 0.9991148400836173,
+        "diag_max": 1.005705220372384,
+        "max_offdiag": 0.0019064245703291607
+      },
+      "gram_reciprocal_reference": {
+        "diag_mean": 0.9999995993846571,
+        "diag_min": 0.9999970651651121,
+        "diag_max": 1.0000004590671936,
+        "max_offdiag": 5.40154084921055e-06
+      }
+    },
+    {
+      "ik": 163,
+      "grid_factor": 1,
+      "ngrid": [
+        11,
+        11,
+        73
+      ],
+      "Nr": 8833,
+      "nbands": 13,
+      "elapsed_s": 0.0497126579284668,
+      "beta_diff_prim": {
+        "max_abs": 3.247661646819238,
+        "rms": 0.413266807434703
+      },
+      "beta_diff_ws": {
+        "max_abs": 3.247661646819237,
+        "rms": 0.4132668074347031
+      },
+      "gram_prim": {
+        "diag_mean": 1.0005159095478418,
+        "diag_min": 0.9991092725222841,
+        "diag_max": 1.0030841825764227,
+        "max_offdiag": 0.002853086304046471
+      },
+      "gram_ws": {
+        "diag_mean": 1.0005159095478418,
+        "diag_min": 0.9991092725222841,
+        "diag_max": 1.0030841825764232,
+        "max_offdiag": 0.002853086304046305
+      },
+      "gram_reciprocal_reference": {
+        "diag_mean": 1.0000002817415727,
+        "diag_min": 0.9999998434147177,
+        "diag_max": 1.0000015733511387,
+        "max_offdiag": 9.147967682664781e-07
+      }
+    },
+    {
+      "ik": 324,
+      "grid_factor": 1,
+      "ngrid": [
+        11,
+        11,
+        73
+      ],
+      "Nr": 8833,
+      "nbands": 13,
+      "elapsed_s": 0.053522348403930664,
+      "beta_diff_prim": {
+        "max_abs": 0.5614973824497935,
+        "rms": 0.09525768680091906
+      },
+      "beta_diff_ws": {
+        "max_abs": 0.5614973824497936,
+        "rms": 0.09525768680091908
+      },
+      "gram_prim": {
+        "diag_mean": 1.0008478032913752,
+        "diag_min": 0.9991201413900298,
+        "diag_max": 1.005561051994028,
+        "max_offdiag": 0.001886202302441215
+      },
+      "gram_ws": {
+        "diag_mean": 1.0008478032913741,
+        "diag_min": 0.9991201413900298,
+        "diag_max": 1.0055610519940277,
+        "max_offdiag": 0.0018862023024412563
+      },
+      "gram_reciprocal_reference": {
+        "diag_mean": 0.9999998646623851,
+        "diag_min": 0.9999974335163678,
+        "diag_max": 1.0000006149522611,
+        "max_offdiag": 3.2363925115166936e-06
+      }
+    },
+    {
+      "ik": 1,
+      "grid_factor": 2,
+      "ngrid": [
+        22,
+        22,
+        146
+      ],
+      "Nr": 70664,
+      "nbands": 13,
+      "elapsed_s": 0.8231441974639893,
+      "beta_diff_prim": {
+        "max_abs": 0.008066355637315486,
+        "rms": 0.0007368605659805798
+      },
+      "beta_diff_ws": {
+        "max_abs": 0.008066355637315923,
+        "rms": 0.0007368605659806424
+      },
+      "gram_prim": {
+        "diag_mean": 1.000014395450676,
+        "diag_min": 0.9998663393019921,
+        "diag_max": 1.000067191576298,
+        "max_offdiag": 0.00013681443847575605
+      },
+      "gram_ws": {
+        "diag_mean": 1.0000143954506757,
+        "diag_min": 0.999866339301992,
+        "diag_max": 1.0000671915762978,
+        "max_offdiag": 0.00013681443847581284
+      },
+      "gram_reciprocal_reference": {
+        "diag_mean": 0.9999995993846571,
+        "diag_min": 0.9999970651651121,
+        "diag_max": 1.0000004590671936,
+        "max_offdiag": 5.40154084921055e-06
+      }
+    },
+    {
+      "ik": 163,
+      "grid_factor": 2,
+      "ngrid": [
+        22,
+        22,
+        146
+      ],
+      "Nr": 70664,
+      "nbands": 13,
+      "elapsed_s": 0.821476936340332,
+      "beta_diff_prim": {
+        "max_abs": 3.2700890424784688,
+        "rms": 0.4191865237899799
+      },
+      "beta_diff_ws": {
+        "max_abs": 3.2700890424784688,
+        "rms": 0.4191865237899799
+      },
+      "gram_prim": {
+        "diag_mean": 1.0000140540634115,
+        "diag_min": 0.9999481964561969,
+        "diag_max": 1.0000658652761483,
+        "max_offdiag": 0.00013221933420876154
+      },
+      "gram_ws": {
+        "diag_mean": 1.0000140540634121,
+        "diag_min": 0.999948196456197,
+        "diag_max": 1.0000658652761483,
+        "max_offdiag": 0.00013221933420859498
+      },
+      "gram_reciprocal_reference": {
+        "diag_mean": 1.0000002817415727,
+        "diag_min": 0.9999998434147177,
+        "diag_max": 1.0000015733511387,
+        "max_offdiag": 9.147967682664781e-07
+      }
+    },
+    {
+      "ik": 324,
+      "grid_factor": 2,
+      "ngrid": [
+        22,
+        22,
+        146
+      ],
+      "Nr": 70664,
+      "nbands": 13,
+      "elapsed_s": 0.8948776721954346,
+      "beta_diff_prim": {
+        "max_abs": 0.5721702884439395,
+        "rms": 0.0926818603858321
+      },
+      "beta_diff_ws": {
+        "max_abs": 0.5721702884439392,
+        "rms": 0.09268186038583207
+      },
+      "gram_prim": {
+        "diag_mean": 1.000013494631157,
+        "diag_min": 0.9998705431021829,
+        "diag_max": 1.0000674243000294,
+        "max_offdiag": 0.00014137048213196525
+      },
+      "gram_ws": {
+        "diag_mean": 1.0000134946311572,
+        "diag_min": 0.9998705431021826,
+        "diag_max": 1.0000674243000294,
+        "max_offdiag": 0.00014137048213202922
+      },
+      "gram_reciprocal_reference": {
+        "diag_mean": 0.9999998646623851,
+        "diag_min": 0.9999974335163678,
+        "diag_max": 1.0000006149522611,
+        "max_offdiag": 3.2363925115166936e-06
+      }
+    },
+    {
+      "ik": 1,
+      "grid_factor": 3,
+      "ngrid": [
+        33,
+        33,
+        219
+      ],
+      "Nr": 238491,
+      "nbands": 13,
+      "elapsed_s": 3.1560323238372803,
+      "beta_diff_prim": {
+        "max_abs": 0.0008987476361894537,
+        "rms": 0.00012206406726171866
+      },
+      "beta_diff_ws": {
+        "max_abs": 0.0008987476361885674,
+        "rms": 0.00012206406726176873
+      },
+      "gram_prim": {
+        "diag_mean": 1.0000034184417594,
+        "diag_min": 0.9999790175014647,
+        "diag_max": 1.0000354371950055,
+        "max_offdiag": 7.02273469058364e-05
+      },
+      "gram_ws": {
+        "diag_mean": 1.0000034184417592,
+        "diag_min": 0.9999790175014649,
+        "diag_max": 1.0000354371950055,
+        "max_offdiag": 7.022734690644998e-05
+      },
+      "gram_reciprocal_reference": {
+        "diag_mean": 0.9999995993846571,
+        "diag_min": 0.9999970651651121,
+        "diag_max": 1.0000004590671936,
+        "max_offdiag": 5.40154084921055e-06
+      }
+    },
+    {
+      "ik": 163,
+      "grid_factor": 3,
+      "ngrid": [
+        33,
+        33,
+        219
+      ],
+      "Nr": 238491,
+      "nbands": 13,
+      "elapsed_s": 2.978111743927002,
+      "beta_diff_prim": {
+        "max_abs": 3.2741334144119714,
+        "rms": 0.41926517293815674
+      },
+      "beta_diff_ws": {
+        "max_abs": 3.274133414411972,
+        "rms": 0.41926517293815674
+      },
+      "gram_prim": {
+        "diag_mean": 1.0000026327801277,
+        "diag_min": 0.9999795265514613,
+        "diag_max": 1.0000349779839963,
+        "max_offdiag": 7.520606361270215e-05
+      },
+      "gram_ws": {
+        "diag_mean": 1.0000026327801275,
+        "diag_min": 0.9999795265514613,
+        "diag_max": 1.0000349779839963,
+        "max_offdiag": 7.520606361248011e-05
+      },
+      "gram_reciprocal_reference": {
+        "diag_mean": 1.0000002817415727,
+        "diag_min": 0.9999998434147177,
+        "diag_max": 1.0000015733511387,
+        "max_offdiag": 9.147967682664781e-07
+      }
+    },
+    {
+      "ik": 324,
+      "grid_factor": 3,
+      "ngrid": [
+        33,
+        33,
+        219
+      ],
+      "Nr": 238491,
+      "nbands": 13,
+      "elapsed_s": 3.139772653579712,
+      "beta_diff_prim": {
+        "max_abs": 0.5723254294055973,
+        "rms": 0.092681047971446
+      },
+      "beta_diff_ws": {
+        "max_abs": 0.5723254294055975,
+        "rms": 0.09268104797144597
+      },
+      "gram_prim": {
+        "diag_mean": 1.000003376163881,
+        "diag_min": 0.9999792071306122,
+        "diag_max": 1.0000353894517224,
+        "max_offdiag": 6.944796643266641e-05
+      },
+      "gram_ws": {
+        "diag_mean": 1.0000033761638811,
+        "diag_min": 0.9999792071306126,
+        "diag_max": 1.0000353894517224,
+        "max_offdiag": 6.944796643273318e-05
+      },
+      "gram_reciprocal_reference": {
+        "diag_mean": 0.9999998646623851,
+        "diag_min": 0.9999974335163678,
+        "diag_max": 1.0000006149522611,
+        "max_offdiag": 3.2363925115166936e-06
+      }
+    }
+  ],
+  "aggregate": {
+    "1": {
+      "worst_beta_diff_prim_max": 3.247661646819238,
+      "worst_beta_diff_ws_max": 3.247661646819237,
+      "worst_gram_prim_offdiag": 0.002853086304046471,
+      "worst_gram_ws_offdiag": 0.002853086304046305,
+      "worst_gram_reciprocal_offdiag": 5.40154084921055e-06
+    },
+    "2": {
+      "worst_beta_diff_prim_max": 3.2700890424784688,
+      "worst_beta_diff_ws_max": 3.2700890424784688,
+      "worst_gram_prim_offdiag": 0.00014137048213196525,
+      "worst_gram_ws_offdiag": 0.00014137048213202922,
+      "worst_gram_reciprocal_offdiag": 5.40154084921055e-06
+    },
+    "3": {
+      "worst_beta_diff_prim_max": 3.2741334144119714,
+      "worst_beta_diff_ws_max": 3.274133414411972,
+      "worst_gram_prim_offdiag": 7.520606361270215e-05,
+      "worst_gram_ws_offdiag": 7.520606361248011e-05,
+      "worst_gram_reciprocal_offdiag": 5.40154084921055e-06
+    }
+  },
+  "prim_shrink_factor": 37.93691847427832,
+  "ws_shrink_factor": 37.93691847438812,
+  "prim_converging": true,
+  "ws_converging": true,
+  "diagnosis": "quadrature_confirmed",
+  "recommendation": "1. Real-space quadrature is confirmed as the residual error source: both the primitive-cell and WS-mapped real-space beta/Gram results converge toward the reciprocal-space reference as the grid is refined. Recommend a reciprocal-space / atom-centered low-rank PAW construction for the production S matrix (the existing nonlq/Qij machinery already gives an accurate, grid-independent correction at the band-pair level) rather than relying on real-space grid refinement, which would require an impractically fine production FFT grid to reach comparable accuracy.",
+  "note": "This script never builds an Nr x Nr matrix, never rescales S, and never clips occupations -- it does not touch the production S/D/eigenvalue pipeline at all."
+}
