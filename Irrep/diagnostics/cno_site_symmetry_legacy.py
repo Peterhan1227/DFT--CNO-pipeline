@@ -6,6 +6,11 @@ subspace incompleteness, or genuine representation non-closure).
 
 Run with the 'irrep' conda environment (has spglib + numpy + scipy).
 
+Deprecated: this historical exploration assumes the former one-to-one WS
+sample map.  It is retained for reproducing its old Si report only.  Use
+``Density matrix cal/symmetry/cno_symmetry.py`` for current finite-volume CNO
+outputs, which may contain an expanded weighted WS sample map.
+
 Physics summary
 ---------------
 For a chosen WS center q, spglib gives the full crystal symmetry (R, t) in
@@ -81,7 +86,7 @@ from scipy.ndimage import map_coordinates
 
 # ── paths ─────────────────────────────────────────────────────────────────────
 HERE         = Path(__file__).resolve().parent
-PIPELINE_DIR = HERE.parent / "Density matrix cal"
+PIPELINE_DIR = HERE.parents[1] / "Density matrix cal"
 sys.path.insert(0, str(PIPELINE_DIR))
 sys.path.insert(0, str(PIPELINE_DIR / "helper functions"))
 

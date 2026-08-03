@@ -1,3 +1,4 @@
+import os
 import sys
 from pathlib import Path
 
@@ -7,17 +8,31 @@ from config import MATERIAL, OUTPUT_SUBDIR
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "helper functions"))
 from ws_cell import read_poscar_structure
+from cno_quadrature import SavedCNOQuadrature
 
 
 N_EXPORT = 10
 
 base_dir = Path(__file__).resolve().parent
 data_dir = base_dir / "Data" / MATERIAL
-output_dir = data_dir / "output" / OUTPUT_SUBDIR
 
-orbitals = np.load(output_dir / "cnos_sym_adapted.npy")
+output_subdir = os.environ.get("CNO_OUTPUT_SUBDIR", OUTPUT_SUBDIR)
+output_dir = data_dir / "output" / output_subdir
+requested_field = os.environ.get("CNO_FIELD_FILE")
+if requested_field is not None:
+    orbital_path = output_dir / requested_field
+else:
+    # Keep the historical symmetrized export when it exists, but make a saved
+    # finite-volume CNO result exportable without any manual source edit.
+    orbital_path = output_dir / "cnos_sym_adapted.npy"
+    if not orbital_path.exists():
+        orbital_path = output_dir / "cno_orbitals.npy"
+
+orbitals = np.load(orbital_path)
 occupations = np.load(output_dir / "cno_occupations.npy")
-grid_shape = np.load(output_dir / "fft_grid_shape.npy").astype(int)
+quadrature = SavedCNOQuadrature.load(output_dir)
+quadrature.validate_cno_rows(orbitals)
+grid_shape = np.asarray(quadrature.sample_grid_shape, dtype=int)
 
 (
     lattice,
@@ -29,12 +44,7 @@ grid_shape = np.load(output_dir / "fft_grid_shape.npy").astype(int)
     atoms_cart,
 ) = read_poscar_structure(data_dir / "POSCAR")
 
-ws_enabled_file = output_dir / "ws_enabled.npy"
-ws_enabled = (
-    bool(np.load(ws_enabled_file))
-    if ws_enabled_file.exists()
-    else False
-)
+ws_enabled = quadrature.method != "regular_fft_grid"
 
 n_export = min(N_EXPORT, orbitals.shape[1])
 
@@ -50,20 +60,15 @@ data = {
     "atoms_frac": atoms_frac,
     "atoms_cart": atoms_cart,
     "ws_enabled": np.array(ws_enabled),
+    "material": np.array(MATERIAL),
 }
 
 if ws_enabled:
     data.update(
-        points_cart=np.load(output_dir / "ws_points_cart.npy"),
-        points_frac_cont=np.load(
-            output_dir / "ws_points_frac_cont.npy"
-        ),
-        base_indices=np.load(
-            output_dir / "ws_base_indices.npy"
-        ),
-        translations=np.load(
-            output_dir / "ws_translation_int.npy"
-        ),
+        points_cart=np.asarray(quadrature.points_cart, dtype=float),
+        points_frac_cont=np.asarray(quadrature.points_frac_cont, dtype=float),
+        base_indices=np.asarray(quadrature.base_indices, dtype=int),
+        translations=np.asarray(quadrature.translations, dtype=int),
         ws_center_cart=np.load(
             output_dir / "ws_center_cart.npy"
         ),

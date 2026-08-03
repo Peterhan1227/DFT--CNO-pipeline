@@ -11,26 +11,9 @@ functions for its real-space cross-check validation.
 """
 import numpy as np
 from sph_harm import sph_r
+from plane_wave import zero_pad_ifft
 
 DIST_PRUNE = 16.0  # Angstrom, same default the original study used
-
-
-def zero_pad_ifft(Ck, gvec, grid_factor, base_ngrid):
-    """Zero-pad (nb, nG) plane-wave coefficients onto a grid_factor-times
-    larger FFT grid and inverse-transform -- EXACT band-limited
-    interpolation of the SAME pseudo wavefunction (no new physics, no VASP
-    rerun). Uses the grid_factor-scaled sqrt(Nr) normalization -- the
-    native Nr is never reused here.
-    """
-    Nx0, Ny0, Nz0 = base_ngrid
-    Nx, Ny, Nz = Nx0 * grid_factor, Ny0 * grid_factor, Nz0 * grid_factor
-    Nr = Nx * Ny * Nz
-    nb = Ck.shape[0]
-    gx, gy, gz = gvec[:, 0] % Nx, gvec[:, 1] % Ny, gvec[:, 2] % Nz
-    cg = np.zeros((nb, Nx, Ny, Nz), dtype=np.complex128)
-    cg[:, gx, gy, gz] = Ck
-    u = np.fft.ifftn(cg, axes=(1, 2, 3)) * np.sqrt(Nr)
-    return u.reshape(nb, Nr), (Nx, Ny, Nz), Nr
 
 
 def real_space_beta_for_bands(pawpp, elements_idx, atom_cart, latvec, r_grid_cart,

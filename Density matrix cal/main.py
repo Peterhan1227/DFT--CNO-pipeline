@@ -1,382 +1,468 @@
+"""Build regional CNOs from the pseudo WAVECAR field or its PAW metric.
+
+This is the public entry point for both production paths.  They share the
+same band selection, Bloch-field evaluation, finite-volume Wigner--Seitz
+quadrature and saved-output contract.  The sole physical difference is the
+metric used for the regional Gram matrix:
+
+* pseudo: ``G_A = <psi_tilde|P_A|psi_tilde>``;
+* PAW:    the same pseudo term plus the regional PAW augmentation term.
+
+Set ``USE_PAW_AUGMENTATION`` in ``config.py`` (or pass ``--augmentation
+paw``) only when the chosen regional boundary intersects a PAW augmentation
+sphere.  The inexpensive geometry pre-check is
+``check_paw_augmentation_needed.py``.
+"""
+from __future__ import annotations
+
+import argparse
+import json
 import sys
-import numpy as np
+import time
 from pathlib import Path
+
+import numpy as np
 from vaspwfc import vaspwfc
-from config import (
-    MATERIAL, LSORBIT, OUTPUT_SUBDIR,
-    ISPIN, RESTRICT_TO_FERMI_WINDOW, EFERMI, FERMI_WINDOW_EV,
-    USE_WS_CELL,
-    WS_CENTER, WS_CENTER_COORD_TYPE, WS_TRANSLATION_SEARCH_RANGE,
+
+import config
+
+HERE = Path(__file__).resolve().parent
+HELPERS = HERE / "helper functions"
+PAW_DIR = HERE / "paw_augmentation"
+sys.path.insert(0, str(HELPERS))
+
+from plane_wave import bloch_fields_on_samples  # noqa: E402
+from ws_cell import (  # noqa: E402
+    build_ws_finite_volume_map,
+    build_ws_grid_map,
+    build_ws_weighted_tie_map,
+    parse_ws_center,
+    read_poscar_structure,
 )
 
-sys.path.insert(0, str(Path(__file__).resolve().parent / "helper functions"))
-from ws_cell import read_poscar_structure, parse_ws_center, build_ws_grid_map
+
+OCC_TOL = 1.0e-6
 
 
-# ── helpers ───────────────────────────────────────────────────────────────────
-
-def _read_eigenval(path, nkpts_expected, nbands_expected):
-    """Parse a BZ-mesh EIGENVAL; return (kfrac, kweights, energies).
-
-    Raises ValueError if the file dimensions do not match expectations,
-    so callers can fall back gracefully.
-    """
-    with open(path) as fh:
-        lines = fh.readlines()
-    nkpts  = int(lines[5].split()[1])
+def _read_eigenval(path: Path, nkpts_expected: int, nbands_expected: int):
+    """Read the BZ k-points, normalized weights, and band energies."""
+    with path.open(encoding="utf-8") as handle:
+        lines = handle.readlines()
+    if len(lines) < 7:
+        raise ValueError("EIGENVAL is too short")
+    nkpts = int(lines[5].split()[1])
     nbands = int(lines[5].split()[2])
-    if nkpts != nkpts_expected or nbands != nbands_expected:
+    if (nkpts, nbands) != (nkpts_expected, nbands_expected):
         raise ValueError(
-            f"EIGENVAL has ({nkpts} k-pts, {nbands} bands) "
-            f"but WAVECAR has ({nkpts_expected}, {nbands_expected})"
+            f"EIGENVAL has ({nkpts} k-points, {nbands} bands), but WAVECAR "
+            f"has ({nkpts_expected}, {nbands_expected})."
         )
-    kfrac    = np.zeros((nkpts, 3))
-    kweights = np.zeros(nkpts)
-    energies = np.zeros((nkpts, nbands))
-    idx = 6
+    kfrac = np.empty((nkpts, 3), dtype=float)
+    kweights = np.empty(nkpts, dtype=float)
+    energies = np.empty((nkpts, nbands), dtype=float)
+    line = 6
     for ik in range(nkpts):
-        while not lines[idx].split():
-            idx += 1
-        kline        = lines[idx].split()
-        kfrac[ik]    = [float(x) for x in kline[:3]]
-        kweights[ik] = float(kline[3])
-        idx += 1
+        while line < len(lines) and not lines[line].split():
+            line += 1
+        if line >= len(lines):
+            raise ValueError("EIGENVAL ended before all k-points were read")
+        fields = lines[line].split()
+        kfrac[ik] = [float(value) for value in fields[:3]]
+        kweights[ik] = float(fields[3])
+        line += 1
         for ib in range(nbands):
-            energies[ik, ib] = float(lines[idx].split()[1])
-            idx += 1
-    kweights /= kweights.sum()
-    return kfrac, kweights, energies
+            energies[ik, ib] = float(lines[line].split()[1])
+            line += 1
+    if not np.isfinite(kweights).all() or kweights.sum() <= 0.0:
+        raise ValueError("EIGENVAL contains invalid k-point weights")
+    return kfrac, kweights / kweights.sum(), energies
 
 
-print("=== Wavecar_to_Coeff: density matrix construction ===\n")
+def _load_kpoint_data(wfc, data_dir: Path):
+    """Load reliable k-point coordinates/weights, retaining old fallbacks."""
+    eigenval = data_dir / "EIGENVAL"
+    mismatch_note = None
+    if eigenval.exists():
+        try:
+            kfrac, kweights, energies = _read_eigenval(
+                eigenval, wfc._nkpts, wfc._nbands,
+            )
+            return kfrac, kweights, energies, "EIGENVAL", "EIGENVAL", mismatch_note
+        except ValueError as exc:
+            mismatch_note = str(exc)
 
-ispin                    = ISPIN
-restrict_to_fermi_window = RESTRICT_TO_FERMI_WINDOW
-efermi                   = EFERMI if RESTRICT_TO_FERMI_WINDOW else None
-fermi_window_ev          = FERMI_WINDOW_EV if RESTRICT_TO_FERMI_WINDOW else None
-
-print(f"ispin={ispin}  restrict_to_fermi_window={restrict_to_fermi_window}"
-      + (f"  efermi={efermi} eV  window=±{fermi_window_ev} eV"
-         if restrict_to_fermi_window else ""))
-print()
-
-
-# ── paths ─────────────────────────────────────────────────────────────────────
-
-data_dir   = Path(__file__).resolve().parent / "Data" / MATERIAL
-output_dir = data_dir / "output" / OUTPUT_SUBDIR
-output_dir.mkdir(parents=True, exist_ok=True)
-
-
-# ── load WAVECAR ──────────────────────────────────────────────────────────────
-
-wfc = vaspwfc(str(data_dir / "WAVECAR"), lsorbit=LSORBIT)
-Nx, Ny, Nz = wfc._ngrid
-Nr = Nx * Ny * Nz
-print(f"WAVECAR  : nkpts={wfc._nkpts}  nbands={wfc._nbands}  "
-      f"ngrid=({Nx},{Ny},{Nz})  encut={wfc._encut:.1f}")
-np.save(output_dir / "fft_grid_shape.npy", np.array([Nx, Ny, Nz], dtype=int))
-
-
-# ── load POSCAR ───────────────────────────────────────────────────────────────
-
-latvec, species, counts, atom_symbols, atom_numbers, frac_coords, cart_coords = \
-    read_poscar_structure(data_dir / "POSCAR")
-volume = abs(np.dot(latvec[0], np.cross(latvec[1], latvec[2])))
-print(f"POSCAR   : volume={volume:.4f} Å³  "
-      f"atoms: {' '.join(f'{s}({c})' for s, c in zip(species, counts))}")
-
-
-# ── k-points: coordinates and weights ────────────────────────────────────────
-# Priority:
-#   1. EIGENVAL — preferred source for both kfrac and kweights.
-#   2. vaspwfc attributes — used if EIGENVAL is absent or dimension-mismatched.
-#   3. Uniform fallback — last resort; valid only for a fully unreduced k mesh.
-
-eigenval_path          = data_dir / "EIGENVAL"
-kfrac_all              = None
-kweights               = None
-band_energies          = None   # populated only when EIGENVAL is parsed
-kcoord_source          = None
-kweight_source         = None
-uniform_warning        = None
-eigenval_mismatch_note = None
-
-if eigenval_path.exists():
-    try:
-        kfrac_all, kweights, band_energies = _read_eigenval(
-            eigenval_path, wfc._nkpts, wfc._nbands
-        )
-        kcoord_source  = "EIGENVAL"
-        kweight_source = "EIGENVAL"
-    except ValueError as e:
-        eigenval_mismatch_note = str(e)
-
-if kfrac_all is None:
+    kfrac = None
     for attr in ("_kvecs", "_kpts", "kvecs", "kpts"):
-        if hasattr(wfc, attr):
-            arr = np.asarray(getattr(wfc, attr), dtype=float)
-            if arr.shape == (wfc._nkpts, 3):
-                kfrac_all     = arr
-                kcoord_source = f"vaspwfc.{attr}"
-                break
-    if kfrac_all is None:
+        value = getattr(wfc, attr, None)
+        if value is not None and np.asarray(value).shape == (wfc._nkpts, 3):
+            kfrac = np.asarray(value, dtype=float)
+            kcoord_source = f"vaspwfc.{attr}"
+            break
+    if kfrac is None:
         raise RuntimeError(
-            "No fractional k-coordinates found. "
-            "Provide a BZ-mesh EIGENVAL or ensure vaspwfc exposes _kvecs/_kpts."
+            "No fractional k-point coordinates found. Provide a matching EIGENVAL "
+            "or use a vaspwfc build exposing _kvecs/_kpts."
         )
 
-if kweights is None:
     for attr in ("_kweights", "_kwhts", "_weights", "kweights", "kwhts", "weights"):
-        if hasattr(wfc, attr):
-            val = getattr(wfc, attr)
-            if val is not None and hasattr(val, "__len__") and len(val) == wfc._nkpts:
-                w              = np.asarray(val, dtype=float)
-                kweights       = w / w.sum()
-                kweight_source = f"vaspwfc.{attr}"
-                break
+        value = getattr(wfc, attr, None)
+        if value is not None and np.asarray(value).shape == (wfc._nkpts,):
+            weights = np.asarray(value, dtype=float)
+            if np.isfinite(weights).all() and weights.sum() > 0.0:
+                return kfrac, weights / weights.sum(), None, kcoord_source, f"vaspwfc.{attr}", mismatch_note
 
-if kweights is None:
-    kweights       = np.ones(wfc._nkpts, dtype=float) / wfc._nkpts
-    kweight_source = "uniform fallback"
-    uniform_warning = (
-        "WARNING: uniform k-weights used. "
-        "This is only physically valid for a fully unreduced BZ mesh (ISYM=0)."
-    )
+    weights = np.ones(wfc._nkpts, dtype=float) / wfc._nkpts
+    return kfrac, weights, None, kcoord_source, "uniform fallback", mismatch_note
 
-np.save(output_dir / "kpoint_weights.npy", kweights)
-kweights_uniform = bool(np.allclose(kweights, kweights[0]))
-print(f"k-points : coord={kcoord_source}  weights={kweight_source}")
-if uniform_warning:
-    print(f"  {uniform_warning}")
 
-kfrac_max_comp = float(np.max(np.abs(kfrac_all)))
-kfrac_warning  = (
-    f"WARNING: max |k_frac| component = {kfrac_max_comp:.4f} > 1.5; "
-    "check that these are reduced fractional reciprocal coordinates."
-    if kfrac_max_comp > 1.5 else None
-)
+def _select_bands(wfc, ik: int, *, ispin: int, restrict_to_fermi_window: bool,
+                  energies, efermi, fermi_window_ev):
+    """The one band-selection rule used by the direct pseudo path."""
+    if restrict_to_fermi_window:
+        if energies is None:
+            raise RuntimeError(
+                "RESTRICT_TO_FERMI_WINDOW=True requires a matching EIGENVAL with band energies."
+            )
+        keep = np.abs(energies[ik - 1] - efermi) <= fermi_window_ev
+        bands = np.where(keep)[0] + 1
+        return bands, np.ones(len(bands), dtype=float)
+    occupations = np.asarray(wfc._occs[ispin - 1, ik - 1], dtype=float)
+    bands = np.where(occupations > OCC_TOL)[0] + 1
+    occ = occupations[bands - 1].copy()
+    # Per-spatial-orbital CNO occupations are conventionally in [0, 1].
+    if len(occ) and occ.max() > 1.5:
+        occ *= 0.5
+    return bands, occ
 
-if restrict_to_fermi_window:
-    if band_energies is None:
-        raise RuntimeError(
-            "Fermi window filtering requires band energies from EIGENVAL, "
-            "but EIGENVAL was not successfully parsed. "
-            "Check that the BZ-mesh EIGENVAL matches the WAVECAR."
+
+def _regular_sample_map(grid_shape):
+    """A full primitive-cell quadrature when no WS restriction is requested."""
+    grid = np.asarray(grid_shape, dtype=int)
+    indices = np.stack(np.meshgrid(*(np.arange(n) for n in grid), indexing="ij"), axis=-1)
+    indices = indices.reshape(-1, 3)
+    frac = indices / grid[None, :]
+    return indices, np.zeros_like(indices), frac, np.ones(len(indices), dtype=float)
+
+
+def _build_quadrature(latvec, source_grid, *, use_ws_cell: bool, center, center_coord_type,
+                      nmax: int, method: str, factor: int):
+    factor = int(factor)
+    if factor < 1:
+        raise ValueError("WS_QUADRATURE_FACTOR must be a positive integer")
+    grid = np.asarray(source_grid, dtype=int) * factor
+    if not use_ws_cell:
+        base, translations, frac, weights = _regular_sample_map(grid)
+        return dict(
+            grid=grid, source_grid=np.asarray(source_grid, dtype=int), factor=factor,
+            base_indices=base, translations=translations, points_frac_cont=frac,
+            points_cart=frac @ latvec, weights=weights, method="regular_fft_grid",
+            center_cart=None, center_frac_wrapped=None,
         )
-    n_win = int(np.sum(np.abs(band_energies - efermi) <= fermi_window_ev))
-    print(f"  Fermi window [{efermi-fermi_window_ev:.3f}, {efermi+fermi_window_ev:.3f}] eV "
-          f"({n_win}/{band_energies.size} states in window)")
 
-
-# ── WS cell / Bloch-phase setup ───────────────────────────────────────────────
-# r_for_phase : (Nr, 3) fractional coords passed to exp(2πi k·r).
-#   WS mode  → r_ws_frac_cont, continuous (unwrapped), possibly outside [0,1).
-#   Prim mode → [ix/Nx, iy/Ny, iz/Nz] in the same C-order as ifftn reshape.
-# prim_indices: (Nr, 3) int — for WS mode, maps each WS point to its FFT index.
-
-r_for_phase       = None
-prim_indices      = None
-translations_all  = None
-center_cart = center_frac_cont = center_frac_wrapped = None
-
-if USE_WS_CELL:
-    center_cart, center_frac_cont, center_frac_wrapped = parse_ws_center(
-        WS_CENTER, WS_CENTER_COORD_TYPE, latvec
+    center_cart, _, center_frac_wrapped = parse_ws_center(center, center_coord_type, latvec)
+    if method == "finite_volume":
+        points_cart, points_frac, base, translations, weights = build_ws_finite_volume_map(
+            latvec, grid, center_cart, nmax=nmax,
+        )
+    elif method == "weighted_ties":
+        points_cart, points_frac, base, translations, weights, _ = build_ws_weighted_tie_map(
+            latvec, grid, center_cart, nmax=nmax,
+        )
+    elif method == "legacy":
+        points_cart, points_frac, base, translations = build_ws_grid_map(
+            latvec, grid, center_cart, nmax=nmax,
+        )
+        weights = np.ones(len(base), dtype=float)
+    else:
+        raise ValueError("WS quadrature must be 'finite_volume', 'weighted_ties', or 'legacy'.")
+    expected = int(np.prod(grid))
+    if not np.isclose(weights.sum(), expected, rtol=0.0, atol=2.0e-7 * expected):
+        raise RuntimeError("WS quadrature weights do not preserve one primitive-cell volume")
+    return dict(
+        grid=grid, source_grid=np.asarray(source_grid, dtype=int), factor=factor,
+        base_indices=base, translations=translations, points_frac_cont=points_frac,
+        points_cart=points_cart, weights=weights, method=method,
+        center_cart=center_cart, center_frac_wrapped=center_frac_wrapped,
     )
-    print(f"WS cell  : center={WS_CENTER} ({WS_CENTER_COORD_TYPE})"
-          f" → {np.round(center_cart, 4)} Å")
-    print(f"           building map grid=({Nx},{Ny},{Nz})"
-          f" nmax={WS_TRANSLATION_SEARCH_RANGE} ...", end="", flush=True)
 
-    r_ws_cart, r_ws_frac_cont, prim_indices, translations_all = build_ws_grid_map(
-        latvec, (Nx, Ny, Nz), center_cart, nmax=WS_TRANSLATION_SEARCH_RANGE
+
+def _build_pseudo_state_matrix(wfc, quadrature, kfrac_all, kweights, *, lsorbit: bool,
+                               ispin: int, restrict_to_fermi_window: bool,
+                               energies, efermi, fermi_window_ev):
+    """Evaluate every included pseudo Bloch state on the shared WS samples."""
+    by_k = []
+    n_columns = 0
+    for ik in range(1, wfc._nkpts + 1):
+        bands, occupations = _select_bands(
+            wfc, ik, ispin=ispin, restrict_to_fermi_window=restrict_to_fermi_window,
+            energies=energies, efermi=efermi, fermi_window_ev=fermi_window_ev,
+        )
+        if len(bands):
+            by_k.append((ik, bands, occupations))
+            n_columns += len(bands) * (2 if lsorbit else 1)
+    if n_columns == 0:
+        raise RuntimeError("No WAVECAR bands were selected for the CNO density matrix")
+
+    n_samples = len(quadrature["weights"])
+    psi = np.empty((n_samples, n_columns), dtype=np.complex128)
+    weights = np.empty(n_columns, dtype=float)
+    states = []
+    col = 0
+    for count, (ik, bands, occupations) in enumerate(by_k, start=1):
+        gvec = wfc.gvectors(ik)
+        n_g = len(gvec)
+        # ``norm=True`` is the direct-pseudo convention used by the original
+        # main.py: every input state has unit norm in the pseudo metric.  The
+        # PAW path deliberately uses raw coefficients instead, because its
+        # augmentation term supplies the corresponding PAW norm.
+        coeff = np.stack([
+            wfc.readBandCoeff(ispin=ispin, ikpt=ik, iband=int(ib), norm=True)
+            for ib in bands
+        ])
+        kfrac = kfrac_all[ik - 1]
+        common = dict(
+            gvec=gvec, source_grid=quadrature["source_grid"], grid_factor=quadrature["factor"],
+            base_indices=quadrature["base_indices"],
+            points_frac_cont=quadrature["points_frac_cont"], k_frac=kfrac,
+        )
+        state_weight = kweights[ik - 1] * occupations
+        if lsorbit:
+            if coeff.shape[1] != 2 * n_g:
+                raise RuntimeError(
+                    f"LSORBIT=True but k-point {ik} has {coeff.shape[1]} coefficients per band, "
+                    f"expected 2*{n_g}."
+                )
+            for component, component_coeff in enumerate((coeff[:, :n_g], coeff[:, n_g:])):
+                fields = bloch_fields_on_samples(component_coeff, **common)
+                stop = col + len(bands)
+                psi[:, col:stop] = fields.T
+                weights[col:stop] = state_weight
+                states.extend(dict(ik=ik, band=int(ib), p=float(p), spin_component=component)
+                              for ib, p in zip(bands, state_weight))
+                col = stop
+        else:
+            if coeff.shape[1] != n_g:
+                raise RuntimeError(
+                    f"Scalar WAVECAR coefficient count ({coeff.shape[1]}) does not match its G-vector count ({n_g})."
+                )
+            fields = bloch_fields_on_samples(coeff, **common)
+            stop = col + len(bands)
+            psi[:, col:stop] = fields.T
+            weights[col:stop] = state_weight
+            states.extend(dict(ik=ik, band=int(ib), p=float(p)) for ib, p in zip(bands, state_weight))
+            col = stop
+        if count == 1 or count % 40 == 0 or count == len(by_k):
+            print(f"  k {count:4d}/{len(by_k)}  ik={ik:4d}  bands={len(bands)}")
+    return psi, weights, states
+
+
+def _solve_pseudo_cnos(psi, state_weights, sample_weights):
+    """Diagonalize the weighted pseudo regional density operator in state space."""
+    sample_weights = np.asarray(sample_weights, dtype=float)
+    gram = psi.conj().T @ (sample_weights[:, None] * psi)
+    gram = 0.5 * (gram + gram.conj().T)
+    sqrt_p = np.sqrt(state_weights)
+    kernel = (sqrt_p[:, None] * gram) * sqrt_p[None, :]
+    kernel = 0.5 * (kernel + kernel.conj().T)
+    eigvals, vectors = np.linalg.eigh(kernel)
+    order = np.argsort(eigvals)[::-1]
+    eigvals, vectors = eigvals[order], vectors[:, order]
+    keep = eigvals > OCC_TOL
+    if not np.any(keep):
+        raise RuntimeError("No positive CNO occupation exceeded the storage tolerance")
+    occupations = eigvals[keep]
+    coefficients = sqrt_p[:, None] * vectors[:, keep] / np.sqrt(occupations)[None, :]
+    cnos = psi @ coefficients
+    weighted_overlap = cnos.conj().T @ (sample_weights[:, None] * cnos)
+    return occupations, cnos, gram, kernel, weighted_overlap
+
+
+def _write_pseudo_output(output_dir: Path, *, material: str, quadrature, cnos, occupations,
+                         kpoint_weights, states, report, use_ws_cell: bool):
+    """Write exactly the output contract consumed by all downstream tools."""
+    np.save(output_dir / "cno_occupations.npy", occupations)
+    np.save(output_dir / "cno_orbitals.npy", cnos)
+    np.save(output_dir / "fft_grid_shape.npy", quadrature["grid"])
+    np.save(output_dir / "kpoint_weights.npy", kpoint_weights)
+    np.save(output_dir / "ws_enabled.npy", np.array(use_ws_cell))
+    np.save(output_dir / "ws_points_cart.npy", quadrature["points_cart"])
+    np.save(output_dir / "ws_points_frac_cont.npy", quadrature["points_frac_cont"])
+    np.save(output_dir / "ws_base_indices.npy", quadrature["base_indices"])
+    np.save(output_dir / "ws_translation_int.npy", quadrature["translations"])
+    np.save(output_dir / "ws_quadrature_weights.npy", quadrature["weights"])
+    np.save(output_dir / "ws_native_grid_count.npy", np.array(int(np.prod(quadrature["grid"])), dtype=int))
+    np.save(output_dir / "ws_source_fft_grid.npy", quadrature["source_grid"])
+    np.save(output_dir / "ws_quadrature_factor.npy", np.array(quadrature["factor"], dtype=int))
+    if quadrature["center_cart"] is not None:
+        np.save(output_dir / "ws_center_cart.npy", quadrature["center_cart"])
+        np.save(output_dir / "ws_center_frac_wrapped.npy", quadrature["center_frac_wrapped"])
+    np.savez(
+        output_dir / "ws_quadrature_grid.npz",
+        format_version=np.array(1, dtype=int),
+        method=np.array(quadrature["method"]),
+        sample_grid_shape=np.asarray(quadrature["grid"], dtype=int),
+        source_fft_grid=np.asarray(quadrature["source_grid"], dtype=int),
+        quadrature_factor=np.array(quadrature["factor"], dtype=int),
+        native_grid_count=np.array(int(np.prod(quadrature["grid"])), dtype=int),
+        base_indices=quadrature["base_indices"],
+        translations=quadrature["translations"],
+        points_frac_cont=quadrature["points_frac_cont"],
+        points_cart=quadrature["points_cart"],
+        weights=quadrature["weights"],
+        center_cart=(quadrature["center_cart"] if quadrature["center_cart"] is not None
+                     else np.full(3, np.nan)),
+        center_frac_wrapped=(quadrature["center_frac_wrapped"] if quadrature["center_frac_wrapped"] is not None
+                             else np.full(3, np.nan)),
     )
-    assert len(r_ws_cart) == Nr
-    print(f"  done  Nr={Nr}")
-
-    r_for_phase = r_ws_frac_cont
-
-    np.save(output_dir / "ws_enabled.npy",            np.array(True))
-    np.save(output_dir / "ws_points_cart.npy",         r_ws_cart)
-    np.save(output_dir / "ws_points_frac_cont.npy",    r_ws_frac_cont)
-    np.save(output_dir / "ws_base_indices.npy",         prim_indices)
-    np.save(output_dir / "ws_translation_int.npy",     translations_all)
-    np.save(output_dir / "ws_center_cart.npy",          center_cart)
-    np.save(output_dir / "ws_center_frac_wrapped.npy",  center_frac_wrapped)
-
-else:
-    ix, iy, iz  = [a.ravel() for a in np.mgrid[0:Nx, 0:Ny, 0:Nz]]
-    r_for_phase = np.column_stack([ix/Nx, iy/Ny, iz/Nz])
-
-print()
+    with (output_dir / "cno_run_report.json").open("w", encoding="utf-8") as handle:
+        json.dump(report, handle, indent=2)
+    with (output_dir / "cno_metadata.txt").open("w", encoding="utf-8") as handle:
+        handle.write("=== Regional pseudo CNO metadata ===\n\n")
+        for name, value in report.items():
+            handle.write(f"{name}: {value}\n")
+        handle.write(f"n_input_states: {len(states)}\n")
 
 
-# ── density matrix loop ───────────────────────────────────────────────────────
-# rho[r,r'] = Σ_nk  w_k * f_nk * psi_nk(r) * psi_nk*(r')
-# psi_nk(r) = exp(2πi k·r_frac) * u_nk(r)      [Bloch phase always applied]
-# u_nk from IFFT of plane-wave coefficients.
+def _main_pseudo(*, material=None, output_subdir=None, ws_quadrature=None,
+                 quadrature_factor=None, overwrite=False):
+    material = material if material is not None else config.MATERIAL
+    output_subdir = output_subdir if output_subdir is not None else config.OUTPUT_SUBDIR
+    method = ws_quadrature if ws_quadrature is not None else getattr(config, "WS_QUADRATURE", "finite_volume")
+    factor = (quadrature_factor if quadrature_factor is not None
+              else getattr(config, "WS_QUADRATURE_FACTOR", 1))
+    output_dir = HERE / "Data" / material / "output" / output_subdir
+    protected = ("cno_occupations.npy", "cno_orbitals.npy", "ws_quadrature_grid.npz")
+    if not overwrite and any((output_dir / name).exists() for name in protected):
+        raise FileExistsError(
+            f"Refusing to overwrite {output_dir}. Choose a new OUTPUT_SUBDIR or pass --overwrite explicitly."
+        )
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-def _to_psi(u_batch, k_frac):
-    """Map (nb, Nx, Ny, Nz) → (nb, Nr) full Bloch wavefunctions."""
-    if prim_indices is not None:   # WS mode: reindex to WS images
-        psi = u_batch[:, prim_indices[:, 0], prim_indices[:, 1], prim_indices[:, 2]]
-    else:
-        psi = u_batch.reshape(u_batch.shape[0], Nr)
-    return psi * np.exp(2j * np.pi * (r_for_phase @ k_frac))[None, :]
+    data_dir = HERE / "Data" / material
+    wfc = vaspwfc(str(data_dir / "WAVECAR"), lsorbit=config.LSORBIT)
+    source_grid = np.asarray(wfc._ngrid, dtype=int)
+    latvec, species, counts, _, _, frac_coords, _ = read_poscar_structure(data_dir / "POSCAR")
+    volume = abs(float(np.linalg.det(latvec)))
+    kfrac, kweights, energies, kcoord_source, kweight_source, mismatch_note = _load_kpoint_data(wfc, data_dir)
+    if kweight_source == "uniform fallback":
+        print("WARNING: uniform k-point weights are valid only for a fully unreduced mesh (ISYM=0).")
+
+    quadrature = _build_quadrature(
+        latvec, source_grid, use_ws_cell=config.USE_WS_CELL,
+        center=config.WS_CENTER, center_coord_type=config.WS_CENTER_COORD_TYPE,
+        nmax=config.WS_TRANSLATION_SEARCH_RANGE, method=method, factor=factor,
+    )
+    print(f"=== Regional pseudo CNO: {material} ===")
+    print(f"output_dir: {output_dir}")
+    print(f"WAVECAR: nkpts={wfc._nkpts} nbands={wfc._nbands} source_grid={tuple(source_grid)}")
+    print(f"WS quadrature: {quadrature['method']} samples={len(quadrature['weights'])} "
+          f"grid={tuple(quadrature['grid'])} factor={quadrature['factor']} "
+          f"weight_sum={quadrature['weights'].sum():.10f}")
+    if config.RESTRICT_TO_FERMI_WINDOW:
+        if energies is None:
+            raise RuntimeError("Fermi-window selection needs a matching EIGENVAL")
+        selected = int(np.sum(np.abs(energies - config.EFERMI) <= config.FERMI_WINDOW_EV))
+        print(f"Fermi window: {selected}/{energies.size} states in "
+              f"[{config.EFERMI-config.FERMI_WINDOW_EV:.3f}, "
+              f"{config.EFERMI+config.FERMI_WINDOW_EV:.3f}] eV")
+
+    t0 = time.perf_counter()
+    psi, state_weights, states = _build_pseudo_state_matrix(
+        wfc, quadrature, kfrac, kweights, lsorbit=config.LSORBIT, ispin=config.ISPIN,
+        restrict_to_fermi_window=config.RESTRICT_TO_FERMI_WINDOW, energies=energies,
+        efermi=config.EFERMI, fermi_window_ev=config.FERMI_WINDOW_EV,
+    )
+    occupations, cnos, gram, kernel, overlap = _solve_pseudo_cnos(
+        psi, state_weights, quadrature["weights"],
+    )
+    elapsed = time.perf_counter() - t0
+    herm_gram = float(np.max(np.abs(gram - gram.conj().T)))
+    herm_kernel = float(np.max(np.abs(kernel - kernel.conj().T)))
+    ortho_error = float(np.max(np.abs(overlap - np.eye(len(occupations)))) )
+    trace_expected = float(np.sum(state_weights))
+    trace_kernel = float(np.trace(kernel).real)
+    report = dict(
+        format_version=1,
+        material=material,
+        calculation="regional_cno",
+        metric="pseudo_only",
+        paw_augmentation=False,
+        input_state_normalization="vaspwfc pseudo norm",
+        lsorbit=bool(config.LSORBIT),
+        ispin=int(config.ISPIN),
+        restrict_to_fermi_window=bool(config.RESTRICT_TO_FERMI_WINDOW),
+        source_fft_grid=[int(x) for x in source_grid],
+        sample_grid=[int(x) for x in quadrature["grid"]],
+        ws_quadrature=quadrature["method"],
+        quadrature_factor=int(quadrature["factor"]),
+        n_samples=int(len(quadrature["weights"])),
+        weight_sum=float(quadrature["weights"].sum()),
+        n_input_states=int(len(states)),
+        n_cnos=int(len(occupations)),
+        kcoord_source=kcoord_source,
+        kweight_source=kweight_source,
+        eigenval_mismatch_note=mismatch_note,
+        volume_Ang3=volume,
+        trace_expected_input=trace_expected,
+        trace_kernel=trace_kernel,
+        trace_minus_expected=trace_kernel - trace_expected,
+        gram_hermiticity_error=herm_gram,
+        kernel_hermiticity_error=herm_kernel,
+        cno_weighted_orthonormality_error=ortho_error,
+        sum_cno_occupations=float(occupations.sum()),
+        top_20_occupations=[float(x) for x in occupations[:20]],
+        elapsed_s=elapsed,
+    )
+    _write_pseudo_output(
+        output_dir, material=material, quadrature=quadrature, cnos=cnos,
+        occupations=occupations, kpoint_weights=kweights, states=states,
+        report=report, use_ws_cell=bool(config.USE_WS_CELL),
+    )
+    print(f"Top occupations: {[round(float(x), 7) for x in occupations[:10]]}")
+    print(f"Tr(K)={trace_kernel:.8f}; input trace={trace_expected:.8f}; "
+          f"weighted CNO orthonormality error={ortho_error:.3e}")
+    print(f"Saved -> {output_dir}")
+    return report
 
 
-occ_tol      = 1e-6
-rho          = np.zeros((Nr, Nr), dtype=np.complex128)
-psi_norms_k1 = []
-
-for ik in range(1, wfc._nkpts + 1):
-    wk     = kweights[ik - 1]
-    k_frac = kfrac_all[ik - 1]
-
-    if restrict_to_fermi_window:
-        # All bands within the energy window get occupation 1 (including empty conduction bands)
-        mask  = np.abs(band_energies[ik - 1] - efermi) <= fermi_window_ev
-        bands = np.where(mask)[0] + 1   # 1-indexed
-        occ   = np.ones(len(bands), dtype=float)
-        if len(bands) == 0:
-            continue
-    else:
-        occ_all = wfc._occs[ispin - 1, ik - 1, :]
-        bands   = np.where(occ_all > occ_tol)[0] + 1   # 1-indexed
-        occ     = occ_all[bands - 1]
-        if np.max(occ) > 1.5:   # spin-degenerate: VASP stores f=2; halve to get per-spin
-            occ = occ / 2.0
-
-    gvec = wfc.gvectors(ik)
-    nG   = gvec.shape[0]
-    gx, gy, gz = gvec[:, 0] % Nx, gvec[:, 1] % Ny, gvec[:, 2] % Nz
-
-    Ck = np.stack([wfc.readBandCoeff(ispin=ispin, ikpt=ik, iband=ib, norm=True)
-                   for ib in bands])
-    nb = len(bands)
-    cg = np.zeros((nb, Nx, Ny, Nz), dtype=np.complex128)
-
-    if LSORBIT:
-        cg_dn = np.zeros_like(cg)
-        cg[:, gx, gy, gz]    = Ck[:, :nG]
-        cg_dn[:, gx, gy, gz] = Ck[:, nG:]
-        psi_up = _to_psi(np.fft.ifftn(cg,    axes=(1, 2, 3)) * np.sqrt(Nr), k_frac)
-        psi_dn = _to_psi(np.fft.ifftn(cg_dn, axes=(1, 2, 3)) * np.sqrt(Nr), k_frac)
-        rho += wk * (psi_up.T @ (psi_up).conj()
-                   + psi_dn.T @ (psi_dn).conj())
-        if ik == 1:
-            psi_norms_k1 = [float(np.linalg.norm(psi_up[i])) for i in range(min(3, nb))]
-    else:
-        cg[:, gx, gy, gz] = Ck
-        psi = _to_psi(np.fft.ifftn(cg, axes=(1, 2, 3)) * np.sqrt(Nr), k_frac)
-        rho += wk * (psi.T @ (occ[:, None] * psi).conj())
-        if ik == 1:
-            psi_norms_k1 = [float(np.linalg.norm(psi[i])) for i in range(min(3, nb))]
-
-    if ik == 1 or ik % 20 == 0 or ik == wfc._nkpts:
-        print(f"  k {ik:4d}/{wfc._nkpts}  wk={wk:.6f}  bands={nb}")
+def main(*, material=None, output_subdir=None, ws_quadrature=None, quadrature_factor=None,
+         use_paw_augmentation=None, overwrite=False):
+    """Run the selected regional-CNO metric through the shared public entry point."""
+    use_paw = (getattr(config, "USE_PAW_AUGMENTATION", False)
+               if use_paw_augmentation is None else bool(use_paw_augmentation))
+    if not use_paw:
+        return _main_pseudo(
+            material=material, output_subdir=output_subdir, ws_quadrature=ws_quadrature,
+            quadrature_factor=quadrature_factor, overwrite=overwrite,
+        )
+    # The PAW module owns only the augmentation construction/validation.  It
+    # writes the exact same weighted quadrature/CNO files as this pseudo path.
+    sys.path.insert(0, str(PAW_DIR))
+    from paw_regional_cno import main as paw_main  # noqa: WPS433
+    return paw_main(
+        material=material, output_subdir=output_subdir, ws_quadrature=(
+            ws_quadrature if ws_quadrature is not None else getattr(config, "WS_QUADRATURE", "finite_volume")
+        ),
+        quadrature_factor=(quadrature_factor if quadrature_factor is not None
+                           else getattr(config, "WS_QUADRATURE_FACTOR", 1)),
+        overwrite=overwrite,
+    )
 
 
-# ── save density matrix and diagonalize ───────────────────────────────────────
-
-np.save(output_dir / "density_matrix.npy", rho)
-herm_err = float(np.max(np.abs(rho - rho.conj().T)))
-tr_rho   = float(np.trace(rho).real)
-print(f"\nrho: |rho-rho†|_max={herm_err:.2e}  Tr={tr_rho:.6f}")
-
-eigvals, eigvecs = np.linalg.eigh(rho)
-order   = np.argsort(eigvals)[::-1]
-eigvals = eigvals[order]
-eigvecs = eigvecs[:, order]
-n_occupied = int(np.sum(eigvals > 1e-6))
-top20      = eigvals[:20]
-
-def _fmt(v):
-    return 0.0 if abs(v) < 1e-12 else float(v)
-
-print(f"Top 20 : {[round(_fmt(v), 6) for v in top20]}")
-print(f"Sum={eigvals.sum():.6f}  N(>1e-6)={n_occupied}")
-
-np.save(output_dir / "cno_occupations.npy", eigvals)
-np.save(output_dir / "cno_orbitals.npy",    eigvecs)
-
-
-# ── metadata (all diagnostics go here, not to terminal) ───────────────────────
-
-meta = output_dir / "cno_metadata.txt"
-with open(meta, "w") as f:
-
-    f.write("=== CNO density matrix metadata ===\n\n")
-
-    f.write(f"material                : {MATERIAL}\n")
-    f.write(f"LSORBIT                 : {LSORBIT}\n")
-    f.write(f"ispin                   : {ispin}\n")
-    f.write(f"restrict_to_fermi_window: {restrict_to_fermi_window}\n")
-    if restrict_to_fermi_window:
-        f.write(f"efermi                  : {efermi} eV\n")
-        f.write(f"fermi_window_ev         : {fermi_window_ev} eV\n")
-    f.write(f"fft_grid                : ({Nx}, {Ny}, {Nz})\n")
-    f.write(f"volume_Ang3             : {volume:.6f}\n")
-    f.write(f"nkpts                   : {wfc._nkpts}\n")
-    f.write(f"nbands                  : {wfc._nbands}\n")
-
-    f.write("\n--- k-point coordinates ---\n")
-    f.write(f"kcoord_source           : {kcoord_source}\n")
-    if eigenval_mismatch_note:
-        f.write(f"eigenval_mismatch_note  : {eigenval_mismatch_note}\n")
-    n_show = min(3, len(kfrac_all))
-    for i in range(n_show):
-        f.write(f"kfrac[{i:>4d}]             : {kfrac_all[i].tolist()}\n")
-    if len(kfrac_all) > n_show:
-        f.write(f"  ...\n")
-        for i in range(max(n_show, len(kfrac_all) - n_show), len(kfrac_all)):
-            f.write(f"kfrac[{i:>4d}]             : {kfrac_all[i].tolist()}\n")
-    if kfrac_warning:
-        f.write(f"{kfrac_warning}\n")
-
-    f.write("\n--- k-point weights ---\n")
-    f.write(f"kweight_source          : {kweight_source}\n")
-    f.write(f"kweight_sum             : {kweights.sum():.8f}\n")
-    f.write(f"kweight_min             : {kweights.min():.8f}\n")
-    f.write(f"kweight_max             : {kweights.max():.8f}\n")
-    f.write(f"kweights_uniform        : {kweights_uniform}\n")
-    if uniform_warning:
-        f.write(f"{uniform_warning}\n")
-
-    f.write("\n--- Wigner-Seitz cell ---\n")
-    f.write(f"USE_WS_CELL             : {USE_WS_CELL}\n")
-    if USE_WS_CELL:
-        f.write(f"ws_center_input         : {WS_CENTER}  ({WS_CENTER_COORD_TYPE})\n")
-        f.write(f"ws_center_frac_wrapped  : {center_frac_wrapped.tolist()}\n")
-        f.write(f"ws_center_cart_Ang      : {[round(x, 6) for x in center_cart.tolist()]}\n")
-        f.write(f"ws_translation_nmax     : {WS_TRANSLATION_SEARCH_RANGE}\n")
-        trans_min = translations_all.min(axis=0).tolist()
-        trans_max = translations_all.max(axis=0).tolist()
-        n_unique  = len(np.unique(translations_all, axis=0))
-        f.write(f"ws_translation_min      : {trans_min}\n")
-        f.write(f"ws_translation_max      : {trans_max}\n")
-        f.write(f"ws_n_unique_translations: {n_unique}\n")
-
-    f.write("\n--- physical ---\n")
-    f.write("bloch_phase             : psi_nk(r) = exp(2*pi*i * k_frac . r_frac_cont) * u_nk(r)\n")
-    f.write(f"rho_hermiticity_error   : {herm_err:.4e}\n")
-    f.write(f"Tr(rho)                 : {tr_rho:.8f}\n")
-    f.write("spin_trace_note         : occupations > 1.5 were halved before accumulation;\n"
-            "                          Tr counts spatial orbitals, not spin-orbitals.\n"
-            "                          Expected Tr ~ 4 for primitive Si (4 occupied spatial bands).\n")
-    if psi_norms_k1:
-        f.write(f"sample_psi_norms_ik1    : {[f'{v:.6f}' for v in psi_norms_k1]}\n")
-
-    f.write("\n--- CNO spectrum ---\n")
-    f.write(f"sum_cno_occ             : {eigvals.sum():.10f}\n")
-    f.write(f"n_eigenvalues_gt_1e-6   : {n_occupied}\n")
-    f.write("top_20_cno_occupations  :\n")
-    for i, v in enumerate(top20):
-        f.write(f"  CNO {i:3d} : {_fmt(v):.10e}\n")
-    if len(top20) > 1:
-        f.write("gaps_between_top_20     :\n")
-        for i in range(len(top20) - 1):
-            f.write(f"  gap {i:2d}→{i+1:<2d} : {_fmt(top20[i] - top20[i+1]):.4e}\n")
-
-print(f"Saved metadata → {meta}")
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--material")
+    parser.add_argument("--output-subdir")
+    parser.add_argument("--ws-quadrature", choices=("finite_volume", "weighted_ties", "legacy"))
+    parser.add_argument("--quadrature-factor", type=int)
+    parser.add_argument("--augmentation", choices=("pseudo", "paw"),
+                        help="Override config.USE_PAW_AUGMENTATION for this run.")
+    parser.add_argument("--overwrite", action="store_true",
+                        help="Permit replacing an existing output directory.")
+    args = parser.parse_args()
+    main(
+        material=args.material, output_subdir=args.output_subdir,
+        ws_quadrature=args.ws_quadrature, quadrature_factor=args.quadrature_factor,
+        use_paw_augmentation=(None if args.augmentation is None else args.augmentation == "paw"),
+        overwrite=args.overwrite,
+    )

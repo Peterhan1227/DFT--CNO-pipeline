@@ -14,19 +14,23 @@ Writes:
 from __future__ import annotations
 
 import sys
+import os
 import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from pathlib import Path
 
-from config import MATERIAL, LSORBIT, OUTPUT_SUBDIR, ISPIN
+from config import MATERIAL, LSORBIT, OUTPUT_SUBDIR, ISPIN, EFERMI
 from vaspwfc import vaspwfc
+
+sys.path.insert(0, str(Path(__file__).resolve().parent / "helper functions"))
+from cno_quadrature import SavedCNOQuadrature
 
 
 # ── user settings ─────────────────────────────────────────────────────────────
 cno_start         = 0              # first CNO index to include
-cno_count         = 8             # number of CNOs starting from cno_start
+cno_count         = 10             # number of CNOs starting from cno_start
 sigma             = 0.03           # Gaussian broadening width (eV)
 emin              = None           # lower energy bound (eV rel. to E_F); None = auto
 emax              = None           # upper energy bound (eV rel. to E_F); None = auto
@@ -121,24 +125,30 @@ def _parse_doscar(path):
 
 base_dir   = Path(__file__).resolve().parent
 data_dir   = base_dir / "Data" / MATERIAL
-output_dir = data_dir / "output" / OUTPUT_SUBDIR
-dos_dir    = output_dir / "cno_dos"
+output_subdir = os.environ.get("CNO_OUTPUT_SUBDIR", OUTPUT_SUBDIR)
+field_name = os.environ.get("CNO_FIELD_FILE", "cno_orbitals.npy")
+output_dir = data_dir / "output" / output_subdir
+dos_dir    = output_dir / os.environ.get("CNO_DOS_OUTPUT_SUBDIR", "cno_dos")
 dos_dir.mkdir(parents=True, exist_ok=True)
 
 # DOS WAVECAR/EIGENVAL — prefer _dos suffix, fall back to plain names
-wavecar_dos_path  = (data_dir / "WAVECAR_dos"  if (data_dir / "WAVECAR_dos").exists()
-                     else data_dir / "WAVECAR")
-eigenval_dos_path = (data_dir / "EIGENVAL_dos" if (data_dir / "EIGENVAL_dos").exists()
-                     else data_dir / "EIGENVAL")
+wavecar_dos_path = (Path(os.environ["CNO_DOS_WAVECAR"])
+                    if "CNO_DOS_WAVECAR" in os.environ else
+                    (data_dir / "WAVECAR_dos" if (data_dir / "WAVECAR_dos").exists()
+                     else data_dir / "WAVECAR"))
+eigenval_dos_path = (Path(os.environ["CNO_DOS_EIGENVAL"])
+                     if "CNO_DOS_EIGENVAL" in os.environ else
+                     (data_dir / "EIGENVAL_dos" if (data_dir / "EIGENVAL_dos").exists()
+                      else data_dir / "EIGENVAL"))
 poscar_path       = data_dir / "POSCAR"
 doscar_path       = data_dir / "DOSCAR"
 
-cno_orb_file    = output_dir / "cnos_sym_adapted.npy"
+cno_orb_file    = output_dir / field_name
 cno_occ_file    = output_dir / "cno_occupations.npy"
 grid_shape_file = output_dir / "fft_grid_shape.npy"
 
 for p, label in [
-    (cno_orb_file,       "cnos_sym_adapted.npy"),
+    (cno_orb_file,       "CNO field"),
     (cno_occ_file,       "cno_occupations.npy"),
     (grid_shape_file,    "fft_grid_shape.npy"),
     (wavecar_dos_path,   "WAVECAR_dos / WAVECAR"),
@@ -152,7 +162,9 @@ for p, label in [
 cno_orbs = np.load(cno_orb_file)
 cno_occ  = np.load(cno_occ_file)
 Nr, n_cno_avail = cno_orbs.shape
-Nx_cno, Ny_cno, Nz_cno = np.load(grid_shape_file).astype(int)
+quadrature = SavedCNOQuadrature.load(output_dir)
+quadrature.validate_cno_rows(cno_orbs)
+Nx_cno, Ny_cno, Nz_cno = quadrature.sample_grid_shape
 
 cno_count = min(cno_count, n_cno_avail - cno_start)
 if not (0 <= cno_start < n_cno_avail):
@@ -179,9 +191,9 @@ if doscar_path.exists():
               f"[{_emin_d:.3f}, {_emax_d:.3f}] eV")
 
 if efermi is None:
-    efermi = 0.0
+    efermi = float(os.environ.get("CNO_DOS_EFERMI", EFERMI))
     if not doscar_path.exists():
-        print("WARNING: DOSCAR not found; E_F set to 0.0 eV.")
+        print(f"WARNING: DOSCAR not found; using configured E_F={efermi:.6f} eV.")
 
 # ── load DOS WAVECAR ──────────────────────────────────────────────────────────
 
@@ -193,14 +205,10 @@ nkpts  = wfc._nkpts
 nbands = wfc._nbands
 print(f"WAVECAR  : nkpts={nkpts}  nbands={nbands}  ngrid=({Nx},{Ny},{Nz})")
 
-if (Nx, Ny, Nz) != (Nx_cno, Ny_cno, Nz_cno):
-    raise ValueError(
-        f"DOS WAVECAR grid ({Nx},{Ny},{Nz}) does not match "
-        f"CNO grid ({Nx_cno},{Ny_cno},{Nz_cno}) from fft_grid_shape.npy.\n"
-        "Ensure the DOS run used the same ENCUT and cell as the density matrix run."
-    )
-if Nr_wfc != Nr:
-    raise ValueError(f"Nr mismatch: WAVECAR has {Nr_wfc}, CNO has {Nr}.")
+quadrature.validate_source_fft_grid((Nx, Ny, Nz))
+print(f"Saved quadrature: {quadrature.method}; samples={quadrature.n_samples}; "
+      f"sample grid=({Nx_cno},{Ny_cno},{Nz_cno}); source grid={quadrature.source_fft_grid}; "
+      f"expanded={quadrature.expanded}")
 
 # ── k-weights and eigenvalues ─────────────────────────────────────────────────
 
@@ -223,42 +231,11 @@ print(f"  cno_indices  = {cno_indices}")
 for idx in cno_indices:
     print(f"    CNO {idx:3d}  occupation = {cno_occ[idx]:.8e}")
 
-# ── WS mode setup ─────────────────────────────────────────────────────────────
-# Mirror the _to_psi logic from main.py / cno_fatband.py exactly.
-
-_ws_enabled_file = output_dir / "ws_enabled.npy"
-ws_mode          = _ws_enabled_file.exists() and bool(np.load(_ws_enabled_file))
-
-if ws_mode:
-    for fname, p in [("ws_base_indices.npy",    output_dir / "ws_base_indices.npy"),
-                     ("ws_points_frac_cont.npy", output_dir / "ws_points_frac_cont.npy")]:
-        if not p.exists():
-            raise FileNotFoundError(
-                f"WS mode active but {fname} not found: {p}\n"
-                "Rerun main.py to regenerate WS map files."
-            )
-    _prim_indices = np.load(output_dir / "ws_base_indices.npy")
-    _r_for_phase  = np.load(output_dir / "ws_points_frac_cont.npy")
-    print(f"WS mode  : True  prim_indices={_prim_indices.shape}  "
-          f"r_ws_frac_cont={_r_for_phase.shape}")
-
-    def _to_psi(u_3d, k_frac):
-        u_ws = u_3d[_prim_indices[:, 0], _prim_indices[:, 1], _prim_indices[:, 2]]
-        return u_ws * np.exp(2j * np.pi * (_r_for_phase @ k_frac))
-
-else:
-    _ix, _iy, _iz = [a.ravel() for a in np.mgrid[0:Nx, 0:Ny, 0:Nz]]
-    _r_for_phase   = np.column_stack([_ix / Nx, _iy / Ny, _iz / Nz])
-    print("WS mode  : False")
-
-    def _to_psi(u_3d, k_frac):
-        return u_3d.reshape(Nr) * np.exp(2j * np.pi * (_r_for_phase @ k_frac))
-
-# ── prepare CNO matrix ────────────────────────────────────────────────────────
-
-_cnos_raw   = np.stack([cno_orbs[:, idx] for idx in cno_indices])    # (n_cnos, Nr)
-_norms      = np.sqrt(np.sum(np.abs(_cnos_raw) ** 2, axis=1, keepdims=True))
-cnos_conj   = (_cnos_raw / _norms).conj()                             # (n_cnos, Nr)
+# ── saved quadrature / CNO bras ───────────────────────────────────────────────
+# The saved map contains every periodic WS image and its finite-volume
+# weight.  It must be used as-is; no WS grid is reconstructed here.
+_cnos_raw = cno_orbs[:, cno_indices]                                  # (Nr, n_cnos)
+cnos_bra = quadrature.normalized_weighted_bra(_cnos_raw)              # (n_cnos, Nr)
 
 # ── projection loop ───────────────────────────────────────────────────────────
 # P_i[n,k] = |<CNO_i | psi_nk>|^2
@@ -272,25 +249,19 @@ weights_all = np.zeros((n_cnos, nbands, nkpts))
 for ik in range(1, nkpts + 1):
     k_frac = kfrac[ik - 1]
     gvec   = wfc.gvectors(ik)
-    gx, gy, gz = gvec[:, 0] % Nx, gvec[:, 1] % Ny, gvec[:, 2] % Nz
-    nG     = len(gx)
+    nG     = len(gvec)
 
     for ib in range(1, nbands + 1):
         coeff      = wfc.readBandCoeff(ispin=ISPIN, ikpt=ik, iband=ib, norm=True)
-        coeff_grid = np.zeros((Nx, Ny, Nz), dtype=np.complex128)
 
         if LSORBIT:
-            coeff_grid_dn = np.zeros((Nx, Ny, Nz), dtype=np.complex128)
-            coeff_grid[gx, gy, gz]    = coeff[:nG]
-            coeff_grid_dn[gx, gy, gz] = coeff[nG:]
-            psi_up = _to_psi(np.fft.ifftn(coeff_grid)    * np.sqrt(Nr), k_frac)
-            psi_dn = _to_psi(np.fft.ifftn(coeff_grid_dn) * np.sqrt(Nr), k_frac)
-            weights_all[:, ib - 1, ik - 1] = (np.abs(cnos_conj @ psi_up) ** 2
-                                             + np.abs(cnos_conj @ psi_dn) ** 2)
+            psi_up = quadrature.bloch_field_from_coeff(coeff[:nG], gvec, k_frac)
+            psi_dn = quadrature.bloch_field_from_coeff(coeff[nG:], gvec, k_frac)
+            weights_all[:, ib - 1, ik - 1] = (np.abs(cnos_bra @ psi_up) ** 2
+                                             + np.abs(cnos_bra @ psi_dn) ** 2)
         else:
-            coeff_grid[gx, gy, gz] = coeff
-            psi = _to_psi(np.fft.ifftn(coeff_grid) * np.sqrt(Nr), k_frac)
-            weights_all[:, ib - 1, ik - 1] = np.abs(cnos_conj @ psi) ** 2
+            psi = quadrature.bloch_field_from_coeff(coeff, gvec, k_frac)
+            weights_all[:, ib - 1, ik - 1] = np.abs(cnos_bra @ psi) ** 2
 
     if ik == 1 or ik % 20 == 0 or ik == nkpts:
         print(f"  k {ik:4d}/{nkpts}  max P: {weights_all[:, :, ik - 1].max():.4f}")
@@ -345,6 +316,10 @@ np.savez(
     cno_dos     = dos_arr,
     sigma       = np.float64(sigma),
     efermi      = np.float64(efermi),
+    cno_field_file = np.array(field_name),
+    quadrature_method = np.array(quadrature.method),
+    quadrature_sample_count = np.array(quadrature.n_samples, dtype=int),
+    quadrature_weight_sum = np.float64(quadrature.weights.sum()),
 )
 print(f"\nSaved projected DOS → {npz_path}")
 

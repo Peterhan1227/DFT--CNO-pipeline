@@ -134,6 +134,35 @@ def replicated_atoms(
     return pos, all_sym
 
 
+def atoms_in_radius(
+    symbols: Sequence,
+    cart_positions: np.ndarray,
+    lattice: np.ndarray,
+    center: np.ndarray,
+    radius: float,
+) -> Tuple[np.ndarray, List[str]]:
+    """Return periodic atom images lying within a Cartesian sphere about ``center``."""
+    lattice = np.asarray(lattice, dtype=np.float64)
+    center = np.asarray(center, dtype=np.float64).reshape(3)
+    cart_positions = np.asarray(cart_positions, dtype=np.float64)
+    lengths = np.linalg.norm(lattice, axis=1)
+    nmax = [int(np.ceil(float(radius) / max(length, 1e-6))) + 1 for length in lengths]
+    positions: List[np.ndarray] = []
+    all_symbols: List[str] = []
+    for ia in range(-nmax[0], nmax[0] + 1):
+        for ib in range(-nmax[1], nmax[1] + 1):
+            for ic in range(-nmax[2], nmax[2] + 1):
+                shift = ia * lattice[0] + ib * lattice[1] + ic * lattice[2]
+                for symbol, position in zip(symbols, cart_positions):
+                    image = position + shift
+                    if np.linalg.norm(image - center) <= float(radius):
+                        positions.append(image)
+                        all_symbols.append(str(symbol))
+    if not positions:
+        return np.empty((0, 3), dtype=np.float64), []
+    return np.asarray(positions, dtype=np.float64), all_symbols
+
+
 def find_bonds(
     positions: np.ndarray,
     symbols: Sequence,
@@ -220,6 +249,44 @@ def build_bonded_crystal(
     return draw_pos, draw_sym, draw_bonds
 
 
+def build_local_bonded_crystal(
+    symbols: Sequence,
+    cart_positions: np.ndarray,
+    lattice: np.ndarray,
+    center: np.ndarray,
+    radius: float,
+    bond_scale: float = 1.15,
+) -> Tuple[np.ndarray, List[str], List[Tuple[int, int]]]:
+    """Return a compact, bonded cluster around an arbitrary physical center.
+
+    The selected sphere gives visual context around a local orbital.  A small
+    bond-length halo is searched to identify neighbours, but only bonds whose
+    two atoms are in the selected context are drawn.  This keeps a local orbital
+    readable instead of expanding the displayed crystal by one coordination
+    shell for every boundary atom.
+    """
+    symbols = [str(symbol) for symbol in symbols]
+    radii = [atom_radius(symbol, scale=1.0) for symbol in symbols]
+    halo = 2.0 * float(bond_scale) * max(radii, default=0.7)
+    candidates, candidate_symbols = atoms_in_radius(
+        symbols, cart_positions, lattice, center, float(radius) + halo
+    )
+    if len(candidates) == 0:
+        return candidates, candidate_symbols, []
+    center = np.asarray(center, dtype=np.float64).reshape(3)
+    primary = np.linalg.norm(candidates - center[None, :], axis=1) <= float(radius)
+    all_bonds = find_bonds(candidates, candidate_symbols, bond_scale=bond_scale)
+    kept_bonds = [(i, j) for i, j in all_bonds if primary[i] and primary[j]]
+    keep = set(int(i) for i in np.flatnonzero(primary))
+    order = sorted(keep)
+    remap = {old: new for new, old in enumerate(order)}
+    return (
+        candidates[order] if order else candidates[:0],
+        [candidate_symbols[i] for i in order],
+        [(remap[i], remap[j]) for i, j in kept_bonds],
+    )
+
+
 def build_atom_glyphs(
     positions: np.ndarray,
     symbols: Sequence,
@@ -302,8 +369,10 @@ __all__ = [
     "primitive_cell_edges",
     "replicated_cell_edges",
     "replicated_atoms",
+    "atoms_in_radius",
     "find_bonds",
     "build_bonded_crystal",
+    "build_local_bonded_crystal",
     "build_atom_glyphs",
     "build_bond_glyphs",
 ]

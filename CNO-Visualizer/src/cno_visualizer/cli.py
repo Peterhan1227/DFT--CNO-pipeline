@@ -30,8 +30,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--display",
         choices=("phase", "density", "real", "imaginary"),
-        default="phase",
-        help="Initial surface coloring (default: phase)",
+        default=None,
+        help="Initial surface coloring (otherwise choose real/phase automatically)",
     )
     parser.add_argument(
         "--view",
@@ -94,7 +94,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     state = ViewerState(
         selected_cno=max(0, min(int(args.cno), data.n_cnos - 1)),
         isovalue_fraction=float(args.iso),
-        display_mode=args.display,
+        display_mode=args.display or "phase",
+        auto_color=args.display is None,
         view_mode=args.view,
         replication=tuple(max(1, int(n)) for n in args.replicate),  # type: ignore[arg-type]
         show_atoms=not args.no_atoms,

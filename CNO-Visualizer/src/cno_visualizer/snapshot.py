@@ -13,6 +13,7 @@ scene helpers; the viewer (scene/controls/state) is never imported.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Sequence, Tuple
 
 import numpy as np
@@ -22,9 +23,47 @@ from cno_visualizer.crystal import (
     build_atom_glyphs,
     build_bond_glyphs,
     build_bonded_crystal,
+    build_local_bonded_crystal,
 )
 from cno_visualizer.data import CNOData
-from cno_visualizer.field import build_crystal_volume, contour_density, set_active_cno
+from cno_visualizer.field import (
+    build_crystal_volume,
+    build_ws_block_volume,
+    clip_surface_to_ws,
+    contour_density,
+    set_active_cno,
+)
+from cno_visualizer.ws_geometry import ws_polyhedron
+
+
+@dataclass(frozen=True)
+class RegionalCNOMap:
+    """Visualization-only description of an explicit finite-volume WS map.
+
+    This deliberately contains no projector, PAW, or DFT logic.  It is a small
+    transport object so upstream callers can ask the visualizer to render the
+    saved CNO rows without knowing how the mesh is constructed.
+    """
+
+    grid_shape: Sequence[int]
+    base_indices: np.ndarray
+    translations: np.ndarray
+    ws_center_cart: np.ndarray
+    points_frac_cont: np.ndarray | None = None
+    points_cart: np.ndarray | None = None
+
+    @classmethod
+    def from_quadrature(cls, quadrature, ws_center_cart) -> "RegionalCNOMap":
+        """Adapt any saved-map object exposing the documented map attributes."""
+        return cls(
+            grid_shape=tuple(int(v) for v in quadrature.sample_grid_shape),
+            base_indices=np.asarray(quadrature.base_indices, dtype=np.int64),
+            translations=np.asarray(quadrature.translations, dtype=np.int64),
+            ws_center_cart=np.asarray(ws_center_cart, dtype=np.float64),
+            points_frac_cont=np.asarray(quadrature.points_frac_cont, dtype=np.float64),
+            points_cart=(None if quadrature.points_cart is None
+                         else np.asarray(quadrature.points_cart, dtype=np.float64)),
+        )
 
 
 def render_cno_gif(
@@ -40,6 +79,8 @@ def render_cno_gif(
     show_atoms: bool = True,
     show_bonds: bool = True,
     show_axes: bool = True,
+    show_ws: bool = True,
+    context_radius: float = 3.1,
     seconds: float = 8.0,
     fps: int = 15,
     deg_per_sec: float = 12.0,
@@ -58,16 +99,30 @@ def render_cno_gif(
     """
     import pyvista as pv
 
-    volume = build_crystal_volume(data, replication)
+    volume = (build_ws_block_volume(data, n_cells=1) if data.expanded_ws
+              else build_crystal_volume(data, replication))
     rho_max = set_active_cno(volume, data, int(cno_index))
     surface = contour_density(volume, float(iso_fraction) * rho_max)
+    geometry = None
+    if data.expanded_ws:
+        assert data.ws_center_cart is not None
+        geometry = ws_polyhedron(data.lattice, data.ws_center_cart)
+        surface = clip_surface_to_ws(surface, geometry)
 
     pl = pv.Plotter(off_screen=True, window_size=tuple(window_size))
     apply_render_quality(pl, background)
 
-    draw_pos, draw_sym, bonds = build_bonded_crystal(
-        data.atom_symbols, data.atoms_cart, data.lattice, replication
-    )
+    if data.expanded_ws:
+        draw_pos, draw_sym, bonds = build_local_bonded_crystal(
+            data.atom_symbols, data.atoms_cart, data.lattice, data.ws_center_cart,
+            radius=context_radius,
+        )
+        atom_scale = 0.22
+    else:
+        draw_pos, draw_sym, bonds = build_bonded_crystal(
+            data.atom_symbols, data.atoms_cart, data.lattice, replication
+        )
+        atom_scale = 0.40
     # Center + scale the view on the orbital region (the isosurface).
     if surface is not None and surface.n_points:
         b = np.asarray(surface.bounds, dtype=np.float64)
@@ -85,16 +140,24 @@ def render_cno_gif(
             smooth_shading=True, specular=0.3, specular_power=15,
             ambient=0.3, diffuse=0.8, show_scalar_bar=False, name="iso",
         )
+    if geometry is not None and show_ws:
+        pl.add_mesh(
+            geometry.polyhedron, color=(0.25, 0.90, 0.95), style="wireframe",
+            line_width=1.5, opacity=0.42, name="wigner_seitz_boundary",
+        )
     if show_atoms and len(draw_pos):
-        atom_mesh, atom_rgb = build_atom_glyphs(draw_pos, draw_sym)
+        atom_mesh, atom_rgb = build_atom_glyphs(draw_pos, draw_sym, radius_scale=atom_scale)
         if atom_mesh.n_points:
             pl.add_mesh(atom_mesh, scalars=atom_rgb, rgb=True, preference="cell",
                         pbr=True, metallic=0.15, roughness=0.45, name="atoms")
     if show_bonds and bonds:
-        bond_mesh = build_bond_glyphs(draw_pos, bonds)
+        bond_mesh = build_bond_glyphs(
+            draw_pos, bonds, radius=0.05 if data.expanded_ws else 0.08
+        )
         if bond_mesh.n_points:
             pl.add_mesh(bond_mesh, color=(0.55, 0.55, 0.58),
-                        pbr=True, metallic=0.2, roughness=0.5, name="bonds")
+                        pbr=True, metallic=0.2, roughness=0.5,
+                        opacity=0.62 if data.expanded_ws else 1.0, name="bonds")
     if show_axes:
         build_coordinate_frame(pl, center, extent)
 
@@ -159,6 +222,7 @@ def render_density_gif(
     *,
     iso_fraction: float = 0.5,
     replication: Tuple[int, int, int] = (2, 2, 2),
+    regional_map: RegionalCNOMap | None = None,
     **kwargs,
 ) -> str:
     """Convenience entry: render straight from a regular ``(Nx, Ny, Nz)`` density grid.
@@ -169,15 +233,31 @@ def render_density_gif(
     ``surface_color``, ``surface_opacity``).
     """
     grid = np.asarray(cno_grid)
-    if grid.ndim != 3:
-        raise ValueError(f"cno_grid must be 3-D (Nx, Ny, Nz), got shape {grid.shape}")
-    cv = grid.reshape(-1, order="C").astype(np.complex128)[None, :]
-    data = CNOData.from_arrays(
-        cv, grid.shape, lattice, atom_symbols=atom_symbols, atoms_cart=atoms_cart
-    )
+    if regional_map is None:
+        if grid.ndim != 3:
+            raise ValueError(f"cno_grid must be 3-D (Nx, Ny, Nz), got shape {grid.shape}")
+        cv = grid.reshape(-1, order="C").astype(np.complex128)[None, :]
+        data = CNOData.from_arrays(
+            cv, grid.shape, lattice, atom_symbols=atom_symbols, atoms_cart=atoms_cart
+        )
+    else:
+        if grid.ndim != 1:
+            raise ValueError(
+                "A RegionalCNOMap requires one CNO row with shape (n_saved_samples,)"
+            )
+        data = CNOData.from_ws_arrays(
+            grid, regional_map.grid_shape, lattice,
+            base_indices=regional_map.base_indices,
+            translations=regional_map.translations,
+            ws_center_cart=regional_map.ws_center_cart,
+            points_frac_cont=regional_map.points_frac_cont,
+            points_cart=regional_map.points_cart,
+            atom_symbols=atom_symbols,
+            atoms_cart=atoms_cart,
+        )
     return render_cno_gif(
         data, 0, output, iso_fraction=iso_fraction, replication=replication, **kwargs
     )
 
 
-__all__ = ["render_cno_gif", "render_density_gif"]
+__all__ = ["RegionalCNOMap", "render_cno_gif", "render_density_gif"]

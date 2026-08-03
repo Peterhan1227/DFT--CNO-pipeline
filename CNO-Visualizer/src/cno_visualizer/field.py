@@ -1,21 +1,12 @@
 """Volumetric mesh construction and density contouring.
 
-The orbital is always rendered on a **regular structured grid** that is built by
-back-mapping the stored values onto the FFT grid ``(Nx, Ny, Nz)`` and then
-contouring ``|psi|^2``.  This is exactly what an external cube viewer (VESTA)
-does, so the isosurface matches the ``.cube`` ground truth bit-for-bit.
-
-Why a regular grid even for WS-mode data
-----------------------------------------
-``|CNO(r)|^2`` is lattice-periodic, so the value stored for the WS representative
-point ``q`` is also the value at the regular grid point ``base_indices[q]``.  We
-therefore invert ``base_indices`` to a lookup table ``G[ix, iy, iz] = q`` and
-build a :class:`pyvista.StructuredGrid` whose geometry follows the (possibly
-non-orthogonal) lattice.  An irregular Delaunay tetrahedralization of the wrapped
-point cloud is **not** used — it produced degenerate tetrahedra and a lumpy
-surface.  The Wigner–Seitz cell is still available analytically (see
-:mod:`cno_visualizer.ws_geometry`); the "WS view" simply contours the same
-regular grid over a small block of cells and clips the surface to that polyhedron.
+Ordinary CNO data is displayed on its regular periodic FFT grid, exactly as a
+cube viewer would.  Expanded finite-volume WS data is different: a boundary FFT
+node can have several distinct *unwrapped* images, so folding it into one
+periodic cube would overwrite samples.  For that case this module builds an
+unstructured mesh of only the complete FFT hexahedra present in the saved map.
+It never fills an exterior node, averages tied images, or uses a point-cloud
+tetrahedralization.
 
 NumPy vs VTK ordering
 ---------------------
@@ -59,6 +50,11 @@ def grid_to_flat_index(data: CNOData) -> np.ndarray:
     * WS mode — invert ``base_indices`` (``base_indices[q] = (ix, iy, iz)``).
     * Primitive mode — ``cno_values`` is the C-order flattening of ``(Nx, Ny, Nz)``.
     """
+    if data.expanded_ws:
+        raise ValueError(
+            "Expanded WS samples cannot be folded into one periodic FFT grid; "
+            "use build_expanded_ws_volume instead."
+        )
     Nx, Ny, Nz = (int(x) for x in data.grid_shape)
     if data.ws_enabled and data.base_indices is not None:
         bi = np.asarray(data.base_indices, dtype=np.int64)
@@ -111,6 +107,50 @@ def _structured_from_index_range(
     return Volume(mesh=grid, point_to_psi_index=p_to_q, is_ws=bool(data.ws_enabled))
 
 
+def build_expanded_ws_volume(data: CNOData) -> Volume:
+    """Build the true unwrapped FFT hexahedral mesh for finite-volume WS data.
+
+    A cell is present only when all eight of its sampled vertices exist.  The
+    ordinary local trilinear interpolation used by VTK to position an iso-level
+    is therefore the only interpolation involved in this visualization.
+    """
+    import pyvista as pv
+
+    if not data.expanded_ws:
+        raise ValueError("build_expanded_ws_volume requires expanded WS data")
+    assert data.base_indices is not None and data.translations is not None
+    shape = np.asarray(data.grid_shape, dtype=np.int64)
+    actual = data.base_indices + data.translations * shape[None, :]
+    if len(np.unique(actual, axis=0)) != data.n_points:
+        raise ValueError("Expanded WS map contains duplicate unwrapped FFT samples")
+
+    lower = actual.min(axis=0)
+    extent = actual.max(axis=0) - lower + 1
+    sample_row = np.full(tuple(int(v) for v in extent), -1, dtype=np.int64)
+    local = actual - lower[None, :]
+    sample_row[local[:, 0], local[:, 1], local[:, 2]] = np.arange(data.n_points)
+
+    # VTK_HEXAHEDRON ordering: counter-clockwise lower face, then upper face.
+    corners = (
+        sample_row[:-1, :-1, :-1], sample_row[1:, :-1, :-1],
+        sample_row[1:, 1:, :-1], sample_row[:-1, 1:, :-1],
+        sample_row[:-1, :-1, 1:], sample_row[1:, :-1, 1:],
+        sample_row[1:, 1:, 1:], sample_row[:-1, 1:, 1:],
+    )
+    complete = np.logical_and.reduce([corner >= 0 for corner in corners])
+    vertices = np.column_stack([corner[complete] for corner in corners]).astype(np.int64)
+    if len(vertices) == 0:
+        raise ValueError("Expanded WS map has no complete FFT cells to contour")
+
+    cells = np.empty((len(vertices), 9), dtype=np.int64)
+    cells[:, 0] = 8
+    cells[:, 1:] = vertices
+    types = np.full(len(vertices), pv.CellType.HEXAHEDRON, dtype=np.uint8)
+    points = (actual / shape[None, :]) @ data.lattice
+    mesh = pv.UnstructuredGrid(cells.ravel(), types, points)
+    return Volume(mesh=mesh, point_to_psi_index=np.arange(data.n_points), is_ws=True)
+
+
 def build_crystal_volume(
     data: CNOData,
     replication: Tuple[int, int, int] = (1, 1, 1),
@@ -120,6 +160,10 @@ def build_crystal_volume(
     This is the default view: it reproduces the periodic ``|psi|^2`` exactly as a
     cube viewer would and tiles cleanly to a supercell.
     """
+    if data.expanded_ws:
+        # A finite-volume regional CNO has one physical WS sample set, not a
+        # periodic field to tile over crystal replicas.
+        return build_expanded_ws_volume(data)
     Nx, Ny, Nz = (int(x) for x in data.grid_shape)
     rx, ry, rz = (max(1, int(r)) for r in replication)
     return _structured_from_index_range(data, (0, 0, 0), (rx * Nx, ry * Ny, rz * Nz))
@@ -131,6 +175,8 @@ def build_ws_block_volume(data: CNOData, n_cells: int = 1) -> Volume:
     The caller is expected to clip the contoured surface to the WS polyhedron via
     :func:`clip_surface_to_ws`; the block must be large enough to contain it.
     """
+    if data.expanded_ws:
+        return build_expanded_ws_volume(data)
     Nx, Ny, Nz = (int(x) for x in data.grid_shape)
     if data.ws_center_frac is not None:
         c = np.floor(np.asarray(data.ws_center_frac, dtype=np.float64)).astype(int)
@@ -237,6 +283,7 @@ __all__ = [
     "Volume",
     "grid_to_flat_index",
     "build_crystal_volume",
+    "build_expanded_ws_volume",
     "build_ws_block_volume",
     "build_primitive_volume",
     "set_active_cno",

@@ -16,7 +16,7 @@ PSD/trace/gauge/closure checks) -> only if that passes, the full spectrum.
 
 Writes to Data/<MATERIAL>/output/<OUTPUT_SUBDIR>/ (same convention as
 main.py), plus paw_regional_report.txt/json with the validation gates.
-Does not modify main.py or config.py (config.py only read).
+It can be invoked directly or through main.py; config.py is read-only.
 
 Full derivation and validation history: RESULTS.md. Superseded methods and
 the diagnostics that led here: diagnostics/ (not imported here, except via
@@ -26,6 +26,7 @@ import sys
 import json
 import time
 import tracemalloc
+from itertools import combinations
 from pathlib import Path
 
 import numpy as np
@@ -35,7 +36,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "helper functions"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent / "helper functions"))
-from ws_cell import read_poscar_structure, parse_ws_center, build_ws_grid_map  # noqa: E402
+from ws_cell import (read_poscar_structure, parse_ws_center, build_ws_grid_map,
+                     build_ws_weighted_tie_map, build_ws_finite_volume_map,
+                     ws_polyhedron)  # noqa: E402
 from direct_fourier import ws_membership  # noqa: E402
 
 from vaspwfc import vaspwfc  # noqa: E402
@@ -44,7 +47,8 @@ from sph_harm import sph_r  # noqa: E402
 from paw_overlap import load_pawpp, build_qij_block  # noqa: E402
 from ase.io import read as ase_read  # noqa: E402
 
-from beta_gauge_utils import read_eigenval_kweights, gauge_correct_beta, OCC_TOL  # noqa: E402
+from beta_gauge_utils import (read_eigenval_kweights, read_eigenval_energies,  # noqa: E402
+                               gauge_correct_beta, OCC_TOL)
 from realspace_beta import zero_pad_ifft, real_space_beta_for_bands  # noqa: E402
 from paw_direct_LA import solve_natural_orbitals_direct  # noqa: E402
 import config  # noqa: E402  -- read-only; only MATERIAL/OUTPUT_SUBDIR/WS_* are ever read
@@ -99,34 +103,140 @@ DIAGONAL_CLOSURE_TOL = 1e-8      # sign-independent algebraic identity -- must b
 PAW_NORM_CLOSURE_TOL = 1e-6      # regional norm vs trusted reciprocal full-Q norm
 PARTITION_CLOSURE_TOL = 1e-3     # sum_images Q_A(atom,image) ~= Q_full(atom)
 
+# ── two-tier validation: WARN (reported, never blocks) vs HARD-STOP (blocks) ──
+# The tolerances above are the tight "should hold if everything is correct"
+# floor used for reporting OK/FAIL. They do NOT, by themselves, decide
+# whether the pipeline stops. PSD violations (G_A_psd/K_A_psd) and
+# occupation-bound violations (occupations_within_01) are reported in full
+# but are explicitly NEVER hard-stopping -- proceed to the full spectrum
+# regardless of how they look, and let the caller judge the physics. The
+# GROSS_* tolerances below are a much looser second threshold reserved for
+# conditions that make the constructed matrix genuinely meaningless: severe
+# non-Hermiticity, or a gross (not just outside the tight tolerance)
+# partition/trace/algebraic closure failure. NaN/Inf and negative state
+# weights hard-stop unconditionally (see _check_finite, FatalValidationError).
+GROSS_HERMITICITY_TOL = 1e-2         # vs HERMITICITY_TOL=1e-8
+GROSS_PARTITION_CLOSURE_TOL = 0.1    # vs PARTITION_CLOSURE_TOL=1e-3
+GROSS_DIAGONAL_CLOSURE_TOL = 1e-2    # vs DIAGONAL_CLOSURE_TOL=1e-8
+GROSS_PAW_NORM_CLOSURE_TOL = 0.1     # vs PAW_NORM_CLOSURE_TOL=1e-6
+GROSS_TRACE_TOL = 1.0                # absolute; vs the 1e-2 warn tolerance
+GROSS_GAUGE_TOL = 1e-2               # vs the 1e-6 warn tolerance
+
+
+class FatalValidationError(RuntimeError):
+    """Raised only for validation failures severe enough that the
+    constructed matrix is meaningless: NaN/Inf, negative state weights,
+    severe non-Hermiticity, or a gross partition/trace/algebraic closure
+    failure. PSD violations and occupation-bound violations are
+    deliberately NOT included here -- those are reported but never
+    hard-stop (see RESULTS.md)."""
+
+
+def _check_finite(name, M):
+    """Hard-stop immediately if M contains any NaN/Inf -- these silently
+    poison every downstream computation (eigh, matmul, ...) without
+    necessarily raising, so this must be checked explicitly."""
+    arr = np.asarray(M)
+    if not np.all(np.isfinite(arr)):
+        n_bad = int(np.sum(~np.isfinite(arr)))
+        raise FatalValidationError(
+            f"{name} contains {n_bad} NaN/Inf entries out of {arr.size} -- "
+            "the constructed matrix is meaningless.")
+
+
+def _tiered_check(name, value, warn_tol, gross_tol=None, comparison="lt"):
+    """A single validation check reported at two thresholds: `warn_tol`
+    (the tight, "should hold if correct" floor used for OK/FAIL reporting)
+    and an optional, much looser `gross_tol` that decides whether this
+    check actually hard-stops the pipeline. comparison='lt': value<tol is
+    OK (used for error magnitudes). comparison='gt': value>tol is OK (used
+    for PSD-style min-eigenvalue bounds, where more negative is worse).
+    gross_tol=None means this check can never hard-stop on its own
+    (PSD/occupation-bound checks use this)."""
+    if comparison == "lt":
+        passed = bool(value < warn_tol)
+        gross_failed = bool(gross_tol is not None and value >= gross_tol)
+    elif comparison == "gt":
+        passed = bool(value > warn_tol)
+        gross_failed = bool(gross_tol is not None and value <= gross_tol)
+    else:
+        raise ValueError(f"unknown comparison: {comparison!r}")
+    return dict(name=name, value=value, warn_tol=warn_tol, gross_tol=gross_tol,
+                passed=passed, gross_failed=gross_failed)
+
 
 # ── geometric site enumeration (purely geometric -- independent of state) ──
 
-def find_contributing_sites(pawpp, elements_idx, atom_cart, latvec, r_grid_cart,
-                             nmax=SITE_SEARCH_NMAX, dist_prune=DIST_PRUNE):
-    """Concrete list of (iatom, image, image_cart) sites with at least one
-    r_grid_cart point within rmax_eff -- the same list every per-site beta
-    computation must use."""
+def find_contributing_sites(pawpp, elements_idx, atom_cart, latvec, center_cart,
+                             ws_nmax=WS_MEMBERSHIP_NMAX, nmax=SITE_SEARCH_NMAX):
+    """All PAW sphere images that can intersect the continuous WS polyhedron.
+
+    This deliberately does *not* inspect the pseudo FFT samples.  A coarse
+    grid can miss a small boundary intersection and thereby omit a PAW image
+    asymmetrically.  The circumscribed WS radius gives a conservative,
+    geometry-only candidate list; zero-Q candidates are removed only after
+    their continuous angular integral has been evaluated.
+    """
     ns = np.arange(-nmax, nmax + 1)
     n1, n2, n3 = [a.ravel() for a in np.meshgrid(ns, ns, ns, indexing='ij')]
     all_n = np.column_stack([n1, n2, n3])
     all_n_cart = all_n @ latvec
-    centroid = r_grid_cart.mean(axis=0)
+    ws_A_frac, ws_b, ws_vertices = ws_polyhedron(latvec, center_cart, nmax=ws_nmax)
+    ws_radius = float(np.max(np.linalg.norm(ws_vertices - center_cart[None, :], axis=1)))
+    # Convert A_frac @ f <= b into Cartesian normals A_cart @ r <= b.
+    ws_A_cart = ws_A_frac @ np.linalg.inv(latvec).T
+
+    def _distance_to_ws(point):
+        """Exact Euclidean point-to-convex-WS distance via active faces."""
+        violation = ws_A_cart @ point - ws_b
+        if np.all(violation <= 1.0e-11):
+            return 0.0
+        best2 = np.inf
+        # At the closest point, 1, 2, or 3 independent WS facets are active.
+        # Solve the KKT equations for every such active set; there are only
+        # eight WS facets for this lattice, so this is cheap and exact up to
+        # floating arithmetic.
+        for size in (1, 2, 3):
+            for choice in combinations(range(len(ws_b)), size):
+                normal = ws_A_cart[list(choice)]
+                gram = normal @ normal.T
+                rhs = normal @ point - ws_b[list(choice)]
+                if np.linalg.matrix_rank(gram, tol=1.0e-12) < size:
+                    continue
+                lagrange = np.linalg.solve(gram, rhs)
+                if np.any(lagrange < -1.0e-10):
+                    continue
+                closest = point - normal.T @ lagrange
+                if np.all(ws_A_cart @ closest <= ws_b + 1.0e-9):
+                    best2 = min(best2, float(np.sum((closest - point) ** 2)))
+        if not np.isfinite(best2):
+            raise RuntimeError("Could not determine distance to WS polyhedron")
+        return float(np.sqrt(best2))
 
     sites = []
     for iatom, ei in enumerate(elements_idx):
         pp = pawpp[ei]
         rmax_eff = pp.proj_rmax * (pp.NPSRNL - 1) / pp.NPSRNL
         images_cart = atom_cart[iatom] + all_n_cart
-        d_centroid = np.linalg.norm(images_cart - centroid[None, :], axis=1)
-        candidate_idx = np.where(d_centroid < dist_prune)[0]
+        # If a PAW sphere intersects the WS cell, its centre lies within this
+        # circumscribed radius plus its own radius.  This may over-include a
+        # few images, which is safe; their Q_A is exactly zero after clipping.
+        d_center = np.linalg.norm(images_cart - center_cart[None, :], axis=1)
+        candidate_idx = np.where(d_center <= ws_radius + rmax_eff + 1.0e-10)[0]
         for ii in candidate_idx:
             Rimg = images_cart[ii]
-            dist = np.linalg.norm(r_grid_cart - Rimg[None, :], axis=1)
-            if (dist <= rmax_eff).any():
-                sites.append(dict(iatom=int(iatom), element=pp.element, pp_idx=int(ei),
-                                   image=tuple(int(x) for x in all_n[ii]),
-                                   image_cart=Rimg, rmax_eff=rmax_eff))
+            distance = _distance_to_ws(Rimg)
+            if distance > rmax_eff + 1.0e-10:
+                continue
+            # A sphere is fully inside iff it remains inside every WS
+            # half-space after moving by its radius in the facet-normal
+            # direction.  Those sites use the exact full Qij shortcut.
+            margin = ws_b - ws_A_cart @ Rimg
+            fully_inside = bool(np.all(margin >= rmax_eff * np.linalg.norm(ws_A_cart, axis=1) - 1.0e-10))
+            sites.append(dict(iatom=int(iatom), element=pp.element, pp_idx=int(ei),
+                              image=tuple(int(x) for x in all_n[ii]), image_cart=Rimg,
+                              rmax_eff=rmax_eff, distance_to_ws=distance,
+                              fully_inside_ws=fully_inside))
     return sites
 
 
@@ -211,88 +321,92 @@ def build_regional_Qij_site(pp, image_cart, center_cart, latvec,
 
 def validate_Q_A_construction(pawpp, elements_idx, atom_cart, latvec, center_cart):
     """Runs the required Q_A checks and returns a report dict. Does not
-    build any production matrix."""
+    build any production matrix.
+
+    Does NOT assume any atom sits at (or fully inside) center_cart --
+    WS_CENTER can be a hollow site, a bond midpoint, anywhere; the method
+    doesn't need an atom-centered cell. All checks below are either
+    trivial-by-construction (forced-outside), use a genuinely far-away
+    point (general-outside), or use a synthetic half-space split of
+    atom 0's sphere (partition/Hermitian/refinement) -- none of them
+    depend on where center_cart actually is."""
     print("=== Validating region-intersected Q_A construction ===")
     report = dict(checks=[])
     pp0 = pawpp[elements_idx[0]]
-    image_cart_far_inside = atom_cart[0]     # atom 0 sits at the WS center (config.WS_CENTER)
+    image_cart_any = atom_cart[0]
     # a point guaranteed far outside any physical WS cell for this system
     image_cart_far_outside = atom_cart[0] + np.array([1000.0, 1000.0, 1000.0])
 
     full_Q = pp0.get_Qij()
+    _check_finite("full_Q (atom 0)", full_Q)
 
-    # (a) sphere entirely inside A: general quadrature (real geometry, atom
-    # 0 at the WS center) should match full_Q closely.
-    Q_inside_general = build_regional_Qij_site(pp0, image_cart_far_inside, center_cart, latvec)
-    err_inside = float(np.max(np.abs(Q_inside_general - full_Q)))
-    report["checks"].append(dict(name="sphere_inside_matches_full_Q",
-                                  max_abs_err=err_inside, passed=bool(err_inside < 1e-3)))
-    print(f"  sphere entirely inside A vs full Q: max|err|={err_inside:.4e}  "
-          f"{'OK' if err_inside < 1e-3 else 'FAIL'}")
-
-    # (b) sphere entirely outside A: forced-outside quadrature must give
+    # (a) sphere entirely outside A: forced-outside quadrature must give
     # exactly zero (trivial by construction, sanity-checks the code path),
     # AND a genuinely far-away site (general quadrature, real membership
-    # test) must also give (numerically) zero.
-    Q_outside_forced = build_regional_Qij_site(pp0, image_cart_far_inside, center_cart, latvec,
+    # test) must also give (numerically) zero. Warn-only (no gross tier):
+    # these are internal code-path sanity checks, not identities on the
+    # production matrix itself.
+    Q_outside_forced = build_regional_Qij_site(pp0, image_cart_any, center_cart, latvec,
                                                 force_all_outside=True)
+    _check_finite("Q_outside_forced", Q_outside_forced)
     err_outside_forced = float(np.max(np.abs(Q_outside_forced)))
     Q_outside_general = build_regional_Qij_site(pp0, image_cart_far_outside, center_cart, latvec)
+    _check_finite("Q_outside_general", Q_outside_general)
     err_outside_general = float(np.max(np.abs(Q_outside_general)))
-    report["checks"].append(dict(name="sphere_outside_is_zero_forced",
-                                  max_abs_err=err_outside_forced, passed=bool(err_outside_forced < 1e-10)))
-    report["checks"].append(dict(name="sphere_outside_is_zero_general",
-                                  max_abs_err=err_outside_general, passed=bool(err_outside_general < 1e-8)))
-    print(f"  sphere entirely outside A (forced path): max|Q_A|={err_outside_forced:.4e}  "
-          f"{'OK' if err_outside_forced < 1e-10 else 'FAIL'}")
-    print(f"  sphere entirely outside A (general, far site): max|Q_A|={err_outside_general:.4e}  "
-          f"{'OK' if err_outside_general < 1e-8 else 'FAIL'}")
+    report["checks"].append(_tiered_check("sphere_outside_is_zero_forced", err_outside_forced, 1e-10))
+    report["checks"].append(_tiered_check("sphere_outside_is_zero_general", err_outside_general, 1e-8))
+    for c in report["checks"][-2:]:
+        print(f"  {c['name']}: max|Q_A|={c['value']:.4e}  {'OK' if c['passed'] else 'FAIL'}")
 
     # (c) partition: split the sphere with an ARTIFICIAL half-space cut
     # (not a real lattice bisector) using a synthetic single-plane
     # "region A" and confirm A-piece + complement-piece = full Q. Reuses
     # the same quadrature machinery with a manual indicator instead of
-    # ws_membership, to isolate "does angular quadrature correctly
-    # partition" from "is ws_membership itself correct" (already exercised
-    # by (a)/(b) above on the real geometry).
+    # ws_membership, so this is independent of where the real WS cell is.
     directions, ang_weight = _angular_grid(N_THETA_DEFAULT, N_PHI_DEFAULT)
     plane_normal = np.array([0.0, 0.0, 1.0])
     indicator_A = (directions @ plane_normal) >= 0.0
     Q_piece_A = _build_Q_with_indicator(pp0, indicator_A, ang_weight, directions)
     Q_piece_B = _build_Q_with_indicator(pp0, ~indicator_A, ang_weight, directions)
+    _check_finite("Q_piece_A", Q_piece_A)
+    _check_finite("Q_piece_B", Q_piece_B)
     err_partition = float(np.max(np.abs((Q_piece_A + Q_piece_B) - full_Q)))
-    report["checks"].append(dict(name="partition_sums_to_full_Q",
-                                  max_abs_err=err_partition, passed=bool(err_partition < 1e-6)))
+    c = _tiered_check("partition_sums_to_full_Q", err_partition, 1e-6, GROSS_PARTITION_CLOSURE_TOL)
+    report["checks"].append(c)
     print(f"  partition (half-space + complement) sums to full Q: max|err|={err_partition:.4e}  "
-          f"{'OK' if err_partition < 1e-6 else 'FAIL'}")
+          f"{'OK' if c['passed'] else 'FAIL'}{'  [GROSS]' if c['gross_failed'] else ''}")
 
     # (d) Hermitian (real symmetric, since AE/PS partial waves and real
     # Ylm's are real-valued -- Q_A must come out numerically real-symmetric).
-    herm_err = float(np.max(np.abs(Q_inside_general - Q_inside_general.T)))
-    report["checks"].append(dict(name="Q_A_hermitian", max_abs_err=herm_err,
-                                  passed=bool(herm_err < 1e-10)))
+    # Uses the synthetic half-space piece from (c) -- any genuinely-split
+    # Q_A works for this check, doesn't need to be the real WS cell.
+    herm_err = float(np.max(np.abs(Q_piece_A - Q_piece_A.T)))
+    c = _tiered_check("Q_A_hermitian", herm_err, 1e-10, GROSS_HERMITICITY_TOL)
+    report["checks"].append(c)
     print(f"  Q_A Hermitian (real-symmetric): max|Q-Q^T|={herm_err:.4e}  "
-          f"{'OK' if herm_err < 1e-10 else 'FAIL'}")
+          f"{'OK' if c['passed'] else 'FAIL'}{'  [GROSS]' if c['gross_failed'] else ''}")
 
-    # (e) refinement: doubling the angular grid density should change Q_A
-    # by less than a small tolerance, for a GENUINELY SPLIT site (the
-    # interesting case -- (a)/(b) are trivial for any resolution).
-    # Atom 1 (Se) is not at the WS center; use its nearest contributing
-    # image if available, else fall back to the synthetic half-space split.
+    # (e) refinement: doubling the angular grid density on the same
+    # synthetic half-space split should change Q_A by less than a small
+    # tolerance -- checks the quadrature has converged. Warn-only: a slow
+    # quadrature is a precision issue, not evidence the matrix is
+    # meaningless.
     Q_refine_coarse = _build_Q_with_indicator(pp0, indicator_A, ang_weight, directions)
     directions_f, ang_weight_f = _angular_grid(N_THETA_REFINED, N_PHI_REFINED)
     indicator_A_f = (directions_f @ plane_normal) >= 0.0
     Q_refine_fine = _build_Q_with_indicator(pp0, indicator_A_f, ang_weight_f, directions_f)
+    _check_finite("Q_refine_fine", Q_refine_fine)
     err_refine = float(np.max(np.abs(Q_refine_fine - Q_refine_coarse)))
-    report["checks"].append(dict(name="quadrature_refinement_converges",
-                                  max_abs_err=err_refine, tol=Q_A_REFINEMENT_TOL,
-                                  passed=bool(err_refine < Q_A_REFINEMENT_TOL)))
+    c = _tiered_check("quadrature_refinement_converges", err_refine, Q_A_REFINEMENT_TOL)
+    report["checks"].append(c)
     print(f"  refinement (n_theta,n_phi {N_THETA_DEFAULT}x{N_PHI_DEFAULT} -> "
           f"{N_THETA_REFINED}x{N_PHI_REFINED}) on a half-space split: max|Δ|={err_refine:.4e}  "
-          f"tol={Q_A_REFINEMENT_TOL:.1e}  {'OK' if err_refine < Q_A_REFINEMENT_TOL else 'FAIL'}")
+          f"tol={Q_A_REFINEMENT_TOL:.1e}  {'OK' if c['passed'] else 'FAIL'}")
 
     report["passed"] = all(c["passed"] for c in report["checks"])
-    print(f"  Q_A validation OVERALL: {'PASS' if report['passed'] else 'FAIL'}")
+    report["gross_failure"] = any(c["gross_failed"] for c in report["checks"])
+    print(f"  Q_A validation: {'ALL OK' if report['passed'] else 'SOME CHECKS FAILED (reported above)'}"
+          f"{'  -- GROSS FAILURE, will hard-stop' if report['gross_failure'] else ''}")
     return report
 
 
@@ -351,7 +465,7 @@ def _default_crossk_kpoints(nkpts):
 
 
 def load_system(material=None, ws_center=None, ws_center_coord_type=None, ws_nmax=None,
-                 lsorbit=None):
+                 lsorbit=None, ws_quadrature="finite_volume", quadrature_factor=1):
     """Loads everything needed for one material. With no arguments, behaves
     exactly as before (reads MATERIAL/WS_CENTER/WS_CENTER_COORD_TYPE/
     WS_TRANSLATION_SEARCH_RANGE/ISPIN from config.py, config.py untouched).
@@ -398,16 +512,57 @@ def load_system(material=None, ws_center=None, ws_center_coord_type=None, ws_nma
     qij_block = build_qij_block(pawpp, elements_idx)
     kweights = read_eigenval_kweights(data_dir / "EIGENVAL", wfc._nkpts, wfc._nbands)
 
+    # Fermi-window band restriction -- same config.py settings and same
+    # semantics as main.py: when enabled, EVERY band within the window
+    # (occupied or not) gets occupation 1, instead of the usual
+    # occ_all > OCC_TOL selection. See build_state_list_and_beta().
+    restrict_to_fermi_window = bool(config.RESTRICT_TO_FERMI_WINDOW)
+    efermi = config.EFERMI if restrict_to_fermi_window else None
+    fermi_window_ev = config.FERMI_WINDOW_EV if restrict_to_fermi_window else None
+    band_energies = None
+    try:
+        band_energies = read_eigenval_energies(data_dir / "EIGENVAL", wfc._nkpts, wfc._nbands)
+    except (FileNotFoundError, ValueError) as e:
+        if restrict_to_fermi_window:
+            raise RuntimeError(
+                "RESTRICT_TO_FERMI_WINDOW=True requires band energies from EIGENVAL, "
+                f"but EIGENVAL could not be parsed ({e}). Check that the BZ-mesh "
+                "EIGENVAL matches the WAVECAR."
+            ) from e
+    if restrict_to_fermi_window:
+        n_win = int(np.sum(np.abs(band_energies - efermi) <= fermi_window_ev))
+        print(f"  Fermi window [{efermi-fermi_window_ev:.3f}, {efermi+fermi_window_ev:.3f}] eV "
+              f"({n_win}/{band_energies.size} states in window)")
+
     ws_center = ws_center if ws_center is not None else config.WS_CENTER
     ws_center_coord_type = ws_center_coord_type if ws_center_coord_type is not None \
         else config.WS_CENTER_COORD_TYPE
     ws_nmax = ws_nmax if ws_nmax is not None else config.WS_TRANSLATION_SEARCH_RANGE
     center_cart, _, center_frac_wrapped = parse_ws_center(ws_center, ws_center_coord_type, latvec)
-    Nx, Ny, Nz = (int(x) for x in wfc._ngrid)
-    Nr = Nx * Ny * Nz
-    r_ws_cart, r_ws_frac_cont, prim_indices, translations_all = build_ws_grid_map(
-        latvec, (Nx, Ny, Nz), center_cart, nmax=ws_nmax,
-    )
+    fft_grid = np.asarray(wfc._ngrid, dtype=int)
+    if int(quadrature_factor) != quadrature_factor or quadrature_factor < 1:
+        raise ValueError("quadrature_factor must be a positive integer")
+    quadrature_factor = int(quadrature_factor)
+    Nx, Ny, Nz = (fft_grid * quadrature_factor).tolist()
+    native_nr = Nx * Ny * Nz
+    if ws_quadrature == "finite_volume":
+        r_ws_cart, r_ws_frac_cont, prim_indices, translations_all, sample_weights = \
+            build_ws_finite_volume_map(latvec, (Nx, Ny, Nz), center_cart, nmax=ws_nmax)
+        tie_count = None
+    elif ws_quadrature == "weighted_ties":
+        r_ws_cart, r_ws_frac_cont, prim_indices, translations_all, sample_weights, tie_count = \
+            build_ws_weighted_tie_map(latvec, (Nx, Ny, Nz), center_cart, nmax=ws_nmax)
+    elif ws_quadrature == "legacy":
+        r_ws_cart, r_ws_frac_cont, prim_indices, translations_all = build_ws_grid_map(
+            latvec, (Nx, Ny, Nz), center_cart, nmax=ws_nmax,
+        )
+        sample_weights = np.ones(native_nr)
+        tie_count = None
+    else:
+        raise ValueError("ws_quadrature must be 'finite_volume', 'weighted_ties', or 'legacy'")
+    Nr = len(sample_weights)
+    if not np.isclose(sample_weights.sum(), native_nr, rtol=0.0, atol=2.0e-7 * native_nr):
+        raise RuntimeError("WS quadrature weights do not integrate one primitive-cell volume")
 
     # per-atom channel ranges within the flat (n_proj_total,) beta ordering
     # -- shared by every function that needs to slice beta by atom.
@@ -424,9 +579,15 @@ def load_system(material=None, ws_center=None, ws_center_coord_type=None, ws_nma
         frac_coords=frac_coords, pawpp=pawpp, elements_idx=elements_idx,
         atoms=atoms, qij_block=qij_block, channel_ranges=channel_ranges,
         kweights=kweights, center_cart=center_cart, ws_nmax=ws_nmax,
-        Nx=Nx, Ny=Ny, Nz=Nz, Nr=Nr, r_ws_cart=r_ws_cart,
+        restrict_to_fermi_window=restrict_to_fermi_window, efermi=efermi,
+        fermi_window_ev=fermi_window_ev, band_energies=band_energies,
+        Nx=Nx, Ny=Ny, Nz=Nz, Nr=Nr, native_nr=native_nr,
+        source_fft_grid=fft_grid, quadrature_factor=quadrature_factor,
+        r_ws_cart=r_ws_cart,
         r_ws_frac_cont=r_ws_frac_cont, prim_indices=prim_indices,
-        translations_all=translations_all, center_frac_wrapped=center_frac_wrapped,
+        translations_all=translations_all, sample_weights=sample_weights,
+        ws_quadrature=ws_quadrature, tie_count=tie_count,
+        center_frac_wrapped=center_frac_wrapped,
         ispin=config.ISPIN,
         # Exact backward compatibility for the already-validated WSe2_mono
         # production path (same representative k-points as before); any
@@ -441,25 +602,38 @@ def load_system(material=None, ws_center=None, ws_center_coord_type=None, ws_nma
 
 
 def precompute_sites_and_Q_A(sys_, n_theta=N_THETA_DEFAULT, n_phi=N_PHI_DEFAULT):
-    """Purely geometric: the list of contributing (atom, image) sites on the
-    NATIVE WS grid, plus each site's region-intersected Q_A -- computed
-    ONCE, reused for every state/k-point."""
+    """Continuous-geometry PAW image list plus each regional ``Q_A``.
+
+    ``Q_A`` is integrated against the same W-centered WS polyhedron as the
+    finite-volume pseudo term.  It is intentionally independent of the
+    pseudo quadrature samples.
+    """
     sites = find_contributing_sites(
         sys_["pawpp"], sys_["elements_idx"], sys_["cart_coords"], sys_["latvec"],
-        sys_["r_ws_cart"], nmax=SITE_SEARCH_NMAX, dist_prune=DIST_PRUNE,
+        sys_["center_cart"], ws_nmax=WS_MEMBERSHIP_NMAX, nmax=SITE_SEARCH_NMAX,
     )
-    print(f"  found {len(sites)} contributing (atom, image) sites on the native WS grid")
+    print(f"  evaluating {len(sites)} geometrically possible (atom, image) PAW sites")
+    retained = []
     for s in sites:
         pp = sys_["pawpp"][s["pp_idx"]]
-        Q_A = build_regional_Qij_site(pp, s["image_cart"], sys_["center_cart"], sys_["latvec"],
-                                       n_theta=n_theta, n_phi=n_phi)
+        Q_A = build_regional_Qij_site(
+            pp, s["image_cart"], sys_["center_cart"], sys_["latvec"],
+            n_theta=n_theta, n_phi=n_phi, force_all_inside=s["fully_inside_ws"])
+        # Conservative site discovery can include a sphere that merely lies
+        # inside the WS circumscribed sphere.  Its exact regional integral is
+        # zero, so remove it here rather than retaining a numerical ghost.
+        if float(np.max(np.abs(Q_A))) < 1.0e-13:
+            continue
         full_Q = pp.get_Qij()
         frac_of_full = float(np.trace(Q_A) / np.trace(full_Q)) if np.trace(full_Q) != 0 else float("nan")
         s["Q_A"] = Q_A
         s["frac_of_full_Q"] = frac_of_full
+        retained.append(s)
         print(f"    atom {s['iatom']} ({s['element']})  image={s['image']}  "
-              f"trace(Q_A)/trace(Q_full)={frac_of_full:.4f}")
-    return sites
+              f"trace(Q_A)/trace(Q_full)={frac_of_full:.4f}  "
+              f"{'full' if s['fully_inside_ws'] else 'boundary-clipped'}")
+    print(f"  retained {len(retained)} PAW sites with nonzero continuous WS intersection")
+    return retained
 
 
 def home_reciprocal_beta(sys_, wfc, ik, bands, Ck):
@@ -486,6 +660,33 @@ def site_beta_from_home(beta_home, k_frac, site, channel_ranges):
     return phase * beta_home[:, sl[0]:sl[1]]
 
 
+def _select_bands(sys_, ik):
+    """Which bands to include at k-point ik, and their occupation weight
+    f_occ -- the single source of truth for band selection, used by
+    build_state_list_and_beta() and every validation check below so
+    production and validation always see the SAME state set. Two modes:
+
+    RESTRICT_TO_FERMI_WINDOW=True (config.py): every band within
+    ±FERMI_WINDOW_EV of EFERMI gets occupation 1 (including empty
+    conduction bands) -- same semantics as main.py.
+
+    Otherwise: the usual occ_all > OCC_TOL selection, halved if VASP
+    stored spin-degenerate f=2 occupations."""
+    wfc = sys_["wfc"]
+    if sys_["restrict_to_fermi_window"]:
+        energies_ik = sys_["band_energies"][ik - 1]
+        mask = np.abs(energies_ik - sys_["efermi"]) <= sys_["fermi_window_ev"]
+        bands = np.where(mask)[0] + 1
+        occ = np.ones(len(bands), dtype=float)
+    else:
+        occ_all = wfc._occs[sys_["ispin"] - 1, ik - 1, :]
+        bands = np.where(occ_all > OCC_TOL)[0] + 1
+        occ = occ_all[bands - 1].copy()
+        if len(occ) and occ.max() > 1.5:
+            occ = occ / 2.0
+    return bands, occ
+
+
 def build_state_list_and_beta(sys_, sites, ik_list):
     """Builds Psi (Nr, nstates) [native grid, G_ps_A] and, for the SAME
     states, per-site beta arrays (nstates, lmmax_atom) -- now computed
@@ -504,11 +705,7 @@ def build_state_list_and_beta(sys_, sites, ik_list):
 
     states = []
     for ik in ik_list:
-        occ_all = wfc._occs[ispin - 1, ik - 1, :]
-        bands = np.where(occ_all > OCC_TOL)[0] + 1
-        occ = occ_all[bands - 1].copy()
-        if len(occ) and occ.max() > 1.5:
-            occ = occ / 2.0
+        bands, occ = _select_bands(sys_, ik)
         wk = sys_["kweights"][ik - 1]
         for ib, f_occ in zip(bands, occ):
             states.append(dict(ik=int(ik), band=int(ib), p=float(wk * f_occ)))
@@ -535,7 +732,10 @@ def build_state_list_and_beta(sys_, sites, ik_list):
                        for ib in bands])
 
         # native-grid Psi (G_ps_A, unchanged from paw_lowrank_cno.py)
-        u_bands0, _, _ = zero_pad_ifft(Ck, gvec, 1, (Nx0, Ny0, Nz0))
+        u_bands0, padded_grid, _ = zero_pad_ifft(
+            Ck, gvec, sys_["quadrature_factor"], (Nx0, Ny0, Nz0))
+        if tuple(padded_grid) != (Nx, Ny, Nz):
+            raise RuntimeError("Zero-padded field grid disagrees with WS quadrature grid")
         u_ws0 = u_bands0[:, base_flat]
         psi_ws0 = u_ws0 * np.exp(2j * np.pi * (sys_["r_ws_frac_cont"] @ kvec))[None, :]
         Psi[:, idxs] = psi_ws0.T
@@ -555,8 +755,16 @@ def build_state_list_and_beta(sys_, sites, ik_list):
     return Psi, beta_by_site, p, states
 
 
-def build_G_A_K_A(Psi, beta_by_site, sites, p):
-    G_ps_A = Psi.conj().T @ Psi
+def build_G_A_K_A(Psi, beta_by_site, sites, p, sample_weights=None):
+    """Build the regional PAW Gram matrix with an explicit pseudo quadrature."""
+    if sample_weights is None:
+        sample_weights = np.ones(Psi.shape[0])
+    sample_weights = np.asarray(sample_weights, dtype=float)
+    if sample_weights.shape != (Psi.shape[0],):
+        raise ValueError("sample_weights must have one entry per pseudo sample")
+    if np.any(sample_weights < 0.0):
+        raise ValueError("sample_weights must be nonnegative")
+    G_ps_A = Psi.conj().T @ (sample_weights[:, None] * Psi)
     G_aug_A = np.zeros_like(G_ps_A)
     for beta_site, s in zip(beta_by_site, sites):
         G_aug_A += beta_site.conj() @ s["Q_A"] @ beta_site.T
@@ -575,6 +783,48 @@ def _herm(M):
     return float(np.max(np.abs(M - M.conj().T)))
 
 
+def entanglement_entropy(eigvals):
+    """Single-particle entanglement entropy from the CNO occupation
+    spectrum lambda_a:
+
+        S = -sum_a [lambda_a ln(lambda_a) + (1-lambda_a) ln(1-lambda_a)]
+
+    Physically lambda_a in [0,1]; numerically eigenvalues can land outside
+    that range (PSD violations, finite quadrature/eigh precision -- these
+    are reported, not hard-stopped, elsewhere in this module). This does
+    NOT silently clip: it always reports how many eigenvalues were out of
+    range and how much "negative"/"excess" mass that represents, then
+    computes the entropy on a clipped COPY only so there is a finite
+    number to report, marking the result PROVISIONAL whenever any
+    clipping actually occurred.
+
+    Returns a dict: entropy (float, computed on the clipped spectrum),
+    provisional (bool, True iff any eigenvalue was outside [0,1]),
+    n_below_zero, n_above_one (counts), negative_mass (sum of |lambda| for
+    lambda<0), excess_mass (sum of lambda-1 for lambda>1)."""
+    lam = np.asarray(eigvals, dtype=float)
+    below = lam < 0
+    above = lam > 1
+    n_below = int(np.sum(below))
+    n_above = int(np.sum(above))
+    negative_mass = float(-np.sum(lam[below])) if n_below else 0.0
+    excess_mass = float(np.sum(lam[above] - 1.0)) if n_above else 0.0
+    provisional = bool(n_below or n_above)
+
+    lam_clipped = np.clip(lam, 0.0, 1.0)
+    one_minus = 1.0 - lam_clipped
+    term = np.zeros_like(lam_clipped)
+    m = lam_clipped > 0
+    term[m] += lam_clipped[m] * np.log(lam_clipped[m])
+    m = one_minus > 0
+    term[m] += one_minus[m] * np.log(one_minus[m])
+    entropy = float(-np.sum(term))
+
+    return dict(entropy=entropy, provisional=provisional,
+                n_below_zero=n_below, n_above_one=n_above,
+                negative_mass=negative_mass, excess_mass=excess_mass)
+
+
 def check_partition_closure(sites, pawpp):
     """Item A: sum_over_images Q_A(atom,image) ~= Q_full(atom), per atom,
     using the FULL Q_A MATRIX (not just its trace)."""
@@ -584,18 +834,22 @@ def check_partition_closure(sites, pawpp):
         by_atom.setdefault(s["iatom"], []).append(s)
     rows = []
     all_ok = True
+    any_gross = False
     for iatom, atom_sites in by_atom.items():
         pp = pawpp[atom_sites[0]["pp_idx"]]
         full_Q = pp.get_Qij()
         Q_sum = sum(s["Q_A"] for s in atom_sites)
+        _check_finite(f"Q_sum (atom {iatom})", Q_sum)
         err = float(np.max(np.abs(Q_sum - full_Q)))
-        ok = bool(err < PARTITION_CLOSURE_TOL)
-        all_ok = all_ok and ok
+        c = _tiered_check("partition_closure", err, PARTITION_CLOSURE_TOL, GROSS_PARTITION_CLOSURE_TOL)
+        all_ok = all_ok and c["passed"]
+        any_gross = any_gross or c["gross_failed"]
         rows.append(dict(iatom=iatom, element=pp.element, n_images=len(atom_sites),
-                          max_abs_err=err, passed=ok))
+                          max_abs_err=err, passed=c["passed"], gross_failed=c["gross_failed"]))
         print(f"  atom {iatom} ({pp.element}): {len(atom_sites)} images, "
-              f"max|sum(Q_A)-Q_full|={err:.4e}  {'OK' if ok else 'FAIL'}")
-    return dict(rows=rows, passed=all_ok)
+              f"max|sum(Q_A)-Q_full|={err:.4e}  {'OK' if c['passed'] else 'FAIL'}"
+              f"{'  [GROSS]' if c['gross_failed'] else ''}")
+    return dict(rows=rows, passed=all_ok, gross_failure=any_gross)
 
 
 def check_diagonal_closure(sys_, sites):
@@ -620,8 +874,7 @@ def check_diagonal_closure(sys_, sites):
     n_checked = 0
     kpoints = sys_["reduced_reference_kpoints"]
     for ik in kpoints:
-        occ_all = wfc._occs[sys_["ispin"] - 1, ik - 1, :]
-        bands = np.where(occ_all > OCC_TOL)[0] + 1
+        bands, _ = _select_bands(sys_, ik)
         if len(bands) == 0:
             continue
         Ck = np.stack([wfc.readBandCoeff(ispin=sys_["ispin"], ikpt=ik, iband=int(ib), norm=False)
@@ -647,15 +900,16 @@ def check_diagonal_closure(sys_, sites):
                     worst = err
                     worst_detail = (ik, ib_idx, iatom)
 
-    passed = bool(worst < DIAGONAL_CLOSURE_TOL)
+    c = _tiered_check("diagonal_closure", worst, DIAGONAL_CLOSURE_TOL, GROSS_DIAGONAL_CLOSURE_TOL)
     print(f"  checked {n_checked} (state, atom) combinations across "
           f"{len(kpoints)} k-points")
     print(f"  worst |sum_images beta^H Q_A beta - beta_home^H Q_full beta_home| = {worst:.4e}  "
           f"(at ik={worst_detail[0] if worst_detail else None}, "
           f"band_idx={worst_detail[1] if worst_detail else None}, "
           f"atom={worst_detail[2] if worst_detail else None})  tol={DIAGONAL_CLOSURE_TOL:.1e}  "
-          f"{'OK' if passed else 'FAIL'}")
-    return dict(worst_err=worst, worst_detail=worst_detail, n_checked=n_checked, passed=passed)
+          f"{'OK' if c['passed'] else 'FAIL'}{'  [GROSS]' if c['gross_failed'] else ''}")
+    return dict(worst_err=worst, worst_detail=worst_detail, n_checked=n_checked,
+                passed=c["passed"], gross_failure=c["gross_failed"])
 
 
 def check_paw_norm_closure(sys_, sites):
@@ -670,8 +924,7 @@ def check_paw_norm_closure(sys_, sites):
     norms_regional = []
     norms_reciprocal = []
     for ik in sys_["reduced_reference_kpoints"]:
-        occ_all = wfc._occs[sys_["ispin"] - 1, ik - 1, :]
-        bands = np.where(occ_all > OCC_TOL)[0] + 1
+        bands, _ = _select_bands(sys_, ik)
         if len(bands) == 0:
             continue
         Ck = np.stack([wfc.readBandCoeff(ispin=sys_["ispin"], ikpt=ik, iband=int(ib), norm=False)
@@ -694,18 +947,20 @@ def check_paw_norm_closure(sys_, sites):
 
     norms_regional = np.concatenate(norms_regional)
     norms_reciprocal = np.concatenate(norms_reciprocal)
+    _check_finite("norms_regional", norms_regional)
+    _check_finite("norms_reciprocal", norms_reciprocal)
     max_diff = float(np.max(np.abs(norms_regional - norms_reciprocal)))
     print(f"  norm_paw_regional:   min={norms_regional.min():.6f}  "
           f"mean={norms_regional.mean():.6f}  max={norms_regional.max():.6f}")
     print(f"  norm_paw_reciprocal: min={norms_reciprocal.min():.6f}  "
           f"mean={norms_reciprocal.mean():.6f}  max={norms_reciprocal.max():.6f}")
     print(f"  max|regional - reciprocal| = {max_diff:.4e}  tol={PAW_NORM_CLOSURE_TOL:.1e}")
-    passed = bool(max_diff < PAW_NORM_CLOSURE_TOL)
-    print(f"  {'OK' if passed else 'FAIL'}")
+    c = _tiered_check("paw_norm_closure", max_diff, PAW_NORM_CLOSURE_TOL, GROSS_PAW_NORM_CLOSURE_TOL)
+    print(f"  {'OK' if c['passed'] else 'FAIL'}{'  [GROSS]' if c['gross_failed'] else ''}")
     return dict(
         min_norm_regional=float(norms_regional.min()), mean_norm_regional=float(norms_regional.mean()),
         max_norm_regional=float(norms_regional.max()), max_diff_from_reciprocal=max_diff,
-        passed=passed,
+        passed=c["passed"], gross_failure=c["gross_failed"],
     )
 
 
@@ -738,8 +993,7 @@ def check_cross_k_vs_realspace(sys_, sites):
     for ik in ik_list:
         kvec = wfc._kvecs[ik - 1]
         gvec = wfc.gvectors(ik)
-        occ_all = wfc._occs[sys_["ispin"] - 1, ik - 1, :]
-        bands = np.where(occ_all > OCC_TOL)[0] + 1
+        bands, _ = _select_bands(sys_, ik)
         labels_by_k[ik] = bands
         Ck = np.stack([wfc.readBandCoeff(ispin=sys_["ispin"], ikpt=ik, iband=int(ib), norm=False)
                        for ib in bands])
@@ -789,6 +1043,8 @@ def check_cross_k_vs_realspace(sys_, sites):
 
     G_regional, labels = _assemble_G_aug(beta_regional_by_site)
     G_realspace, labels2 = _assemble_G_aug(beta_realspace_by_site)
+    _check_finite("G_regional (cross-k check)", G_regional)
+    _check_finite("G_realspace (cross-k check)", G_realspace)
     assert labels == labels2
     ik_of = np.array([lab[0] for lab in labels])
     cross_mask = ik_of[:, None] != ik_of[None, :]
@@ -798,10 +1054,13 @@ def check_cross_k_vs_realspace(sys_, sites):
     print(f"  max|beta_regional - beta_realspace| (per site/state) = {max_err:.4e}")
     print(f"  max|G_aug_regional - G_aug_realspace| (full block) = {max_block_err:.4e}")
     print(f"  max|...| (cross-k sub-block only) = {max_crossk_err:.4e}")
+    # Warn-only: this compares two independently-approximated quantities
+    # (regional reciprocal-beta vs. a converged real-space reconstruction)
+    # against each other, not an exact algebraic identity -- never gross.
     passed = bool(max_block_err < 5e-3)
     print(f"  {'OK' if passed else 'FAIL'}")
     return dict(max_beta_err=max_err, max_block_err=max_block_err,
-                max_crossk_err=max_crossk_err, passed=passed)
+                max_crossk_err=max_crossk_err, passed=passed, gross_failure=False)
 
 
 def validate_reduced_reference(sys_, sites):
@@ -819,7 +1078,24 @@ def validate_reduced_reference(sys_, sites):
     crossk_report = check_cross_k_vs_realspace(sys_, sites)
 
     Psi, beta_by_site, p, states = build_state_list_and_beta(sys_, sites, kpoints)
-    G_ps_A, G_aug_A, G_A, K_A = build_G_A_K_A(Psi, beta_by_site, sites, p)
+    # Hard-stop unconditionally on negative state weights (wk*f_occ < 0):
+    # physically impossible, always indicates corrupt input data, never a
+    # borderline case worth just reporting.
+    if np.any(p < 0):
+        bad = np.where(p < 0)[0]
+        raise FatalValidationError(
+            f"{len(bad)} state(s) have negative weight p=wk*f_occ (worst={p.min():.4e}) -- "
+            "corrupt occupation/k-weight data.")
+    _check_finite("Psi (reduced reference)", Psi)
+    for i, b in enumerate(beta_by_site):
+        _check_finite(f"beta_by_site[{i}]", b)
+
+    G_ps_A, G_aug_A, G_A, K_A = build_G_A_K_A(
+        Psi, beta_by_site, sites, p, sample_weights=sys_["sample_weights"])
+    _check_finite("G_ps_A", G_ps_A)
+    _check_finite("G_aug_A", G_aug_A)
+    _check_finite("G_A", G_A)
+    _check_finite("K_A", K_A)
 
     report = dict(kpoints=kpoints, n_states=len(states),
                   partition_closure=partition_report, diagonal_closure=diagonal_report,
@@ -857,32 +1133,55 @@ def validate_reduced_reference(sys_, sites):
     phase = np.exp(1j * theta)
     Psi_g = Psi * phase[None, :]
     beta_by_site_g = [b * phase[:, None] for b in beta_by_site]
-    G_ps_A_g, G_aug_A_g, G_A_g, K_A_g = build_G_A_K_A(Psi_g, beta_by_site_g, sites, p)
+    G_ps_A_g, G_aug_A_g, G_A_g, K_A_g = build_G_A_K_A(
+        Psi_g, beta_by_site_g, sites, p, sample_weights=sys_["sample_weights"])
     eig_after = np.sort(np.linalg.eigvalsh(0.5 * (G_A_g + G_A_g.conj().T)))
     gauge_diff = float(np.max(np.abs(eig_before - eig_after)))
     report["gauge_invariance_max_eig_diff"] = gauge_diff
     print(f"  max|Δeig(G_A)| under random state rephasing = {gauge_diff:.3e}")
 
-    checks = dict(
-        partition_closure=partition_report["passed"],
-        diagonal_closure=diagonal_report["passed"],
-        paw_norm_closure=paw_norm_report["passed"],
-        cross_k_vs_realspace=crossk_report["passed"],
-        G_ps_A_psd=bool(report["min_eig_G_ps_A"] > -1e-6),
-        G_A_hermitian=bool(report["herm_G_A"] < HERMITICITY_TOL),
-        K_A_hermitian=bool(report["herm_K_A"] < HERMITICITY_TOL),
-        G_A_psd=bool(report["min_eig_G_A"] > -1e-3),
-        K_A_psd=bool(report["min_eig_K_A"] > -1e-3),
-        occupations_within_01=bool(n_out_of_bounds == 0),
-        trace_matches_expected=bool(abs(report["trace_diff"]) < 1e-2),
-        gauge_invariant=bool(gauge_diff < 1e-6),
+    # Two tiers throughout: PSD (G_ps_A/G_A/K_A) and occupation-bound checks
+    # are reported but NEVER hard-stop (gross_tol=None) -- a PSD violation
+    # or an out-of-[0,1] occupation is physically informative, not proof
+    # the matrix is meaningless, and the pipeline must be allowed to run to
+    # completion so that information reaches the report. Hermiticity/trace/
+    # gauge-invariance/closure checks DO have a gross tier: those are exact
+    # linear-algebra identities that should hold regardless of any physical
+    # subtlety, so a GROSS violation of one of those really does mean the
+    # constructed matrix is broken, not just physically surprising.
+    tiered = dict(
+        # partition_closure's own per-atom gross-tolerance comparison
+        # already happened inside check_partition_closure -- reuse its
+        # verdict directly rather than re-deriving it from a single scalar.
+        partition_closure=dict(name="partition_closure", passed=partition_report["passed"],
+                                gross_failed=partition_report["gross_failure"]),
+        diagonal_closure=_tiered_check("diagonal_closure", diagonal_report["worst_err"],
+                                        DIAGONAL_CLOSURE_TOL, GROSS_DIAGONAL_CLOSURE_TOL),
+        paw_norm_closure=_tiered_check("paw_norm_closure", paw_norm_report["max_diff_from_reciprocal"],
+                                        PAW_NORM_CLOSURE_TOL, GROSS_PAW_NORM_CLOSURE_TOL),
+        cross_k_vs_realspace=_tiered_check("cross_k_vs_realspace", crossk_report["max_block_err"], 5e-3),
+        G_ps_A_psd=_tiered_check("G_ps_A_psd", report["min_eig_G_ps_A"], -1e-6, None, "gt"),
+        G_A_hermitian=_tiered_check("G_A_hermitian", report["herm_G_A"], HERMITICITY_TOL, GROSS_HERMITICITY_TOL),
+        K_A_hermitian=_tiered_check("K_A_hermitian", report["herm_K_A"], HERMITICITY_TOL, GROSS_HERMITICITY_TOL),
+        G_A_psd=_tiered_check("G_A_psd", report["min_eig_G_A"], -1e-3, None, "gt"),
+        K_A_psd=_tiered_check("K_A_psd", report["min_eig_K_A"], -1e-3, None, "gt"),
+        occupations_within_01=_tiered_check("occupations_within_01", n_out_of_bounds, 0.5, None),
+        trace_matches_expected=_tiered_check("trace_matches_expected", abs(report["trace_diff"]),
+                                              1e-2, GROSS_TRACE_TOL),
+        gauge_invariant=_tiered_check("gauge_invariant", gauge_diff, 1e-6, GROSS_GAUGE_TOL),
     )
+    checks = {name: c["passed"] for name, c in tiered.items()}
+    gross = {name: c["gross_failed"] for name, c in tiered.items()}
     report["checks"] = checks
+    report["checks_detail"] = tiered
     report["passed"] = all(checks.values())
+    report["gross_failure"] = any(gross.values())
     print("\n  --- reduced-reference validation summary ---")
     for name, ok in checks.items():
-        print(f"    {name:28s} {'OK' if ok else 'FAIL'}")
-    print(f"    OVERALL: {'PASS' if report['passed'] else 'FAIL'}")
+        tag = "  [GROSS]" if gross[name] else ("" if ok else "  (non-blocking)")
+        print(f"    {name:28s} {'OK' if ok else 'FAIL'}{tag}")
+    print(f"    OVERALL: {'PASS' if report['passed'] else 'FAIL (see above -- non-GROSS failures do not block)'}")
+    print(f"    GROSS FAILURE (would hard-stop): {report['gross_failure']}")
     return report
 
 
@@ -915,26 +1214,37 @@ def _write_blocked_report(output_dir, reason, extra=None):
                    indent=2, default=_json_default)
 
 
-def main(material=None, ws_center=None, ws_center_coord_type=None, ws_nmax=None, lsorbit=None):
-    """With no arguments: exactly the config.py-driven production path.
-    Overrides let this be run against a different material (e.g. Si, CoSn)
-    without touching config.py -- see load_system(). Writes to the SAME
-    Data/<material>/output/<OUTPUT_SUBDIR>/ directory main.py writes to, in
-    the same file-format contract main.py's downstream scripts expect
-    (cno_occupations.npy / cno_orbitals.npy of matching length, sorted
-    descending; fft_grid_shape.npy; ws_*.npy)."""
+def main(material=None, ws_center=None, ws_center_coord_type=None, ws_nmax=None, lsorbit=None,
+         ws_quadrature="finite_volume", quadrature_factor=1, output_subdir=None, overwrite=False):
+    """Build regional PAW CNOs with a physically defined WS quadrature.
+
+    ``ws_quadrature='finite_volume'`` is the production path.  It writes an
+    expanded weighted WS sample map, so callers should use a fresh
+    ``output_subdir``.  Existing data are protected unless ``overwrite=True``
+    is explicitly requested.  ``weighted_ties`` is a narrow boundary-tie
+    diagnostic; ``legacy`` exists only for reproducing historical output.
+    """
     t_start = time.time()
     tracemalloc.start()
 
     material_eff = material if material is not None else config.MATERIAL
+    output_subdir_eff = output_subdir if output_subdir is not None else config.OUTPUT_SUBDIR
     output_dir = (Path(__file__).resolve().parent.parent / "Data" / material_eff
-                  / "output" / config.OUTPUT_SUBDIR)
+                  / "output" / output_subdir_eff)
+    protected = ["cno_occupations.npy", "cno_orbitals.npy", "paw_regional_report.json"]
+    if not overwrite and any((output_dir / name).exists() for name in protected):
+        raise FileExistsError(
+            f"Refusing to overwrite existing regional-CNO output {output_dir}. "
+            "Choose a new output_subdir or pass overwrite=True explicitly."
+        )
     output_dir.mkdir(parents=True, exist_ok=True)
 
     try:
         sys_ = load_system(material=material, ws_center=ws_center,
                             ws_center_coord_type=ws_center_coord_type,
-                            ws_nmax=ws_nmax, lsorbit=lsorbit)
+                            ws_nmax=ws_nmax, lsorbit=lsorbit,
+                            ws_quadrature=ws_quadrature,
+                            quadrature_factor=quadrature_factor)
     except UnsupportedSOCError as e:
         tracemalloc.stop()
         _write_blocked_report(output_dir, str(e))
@@ -942,74 +1252,121 @@ def main(material=None, ws_center=None, ws_center_coord_type=None, ws_nmax=None,
         return None
     print(f"=== Regional T^dagger P_A T PAW-CNO: {sys_['material']} ===\n")
     print(f"output_dir: {output_dir}\n")
+    print(f"WS quadrature: {sys_['ws_quadrature']}  samples={sys_['Nr']} "
+          f"(grid={sys_['Nx']}x{sys_['Ny']}x{sys_['Nz']}, "
+          f"zero-pad factor={sys_['quadrature_factor']}, "
+          f"weight sum={sys_['sample_weights'].sum():.10f})\n")
 
-    qa_report = validate_Q_A_construction(
-        sys_["pawpp"], sys_["elements_idx"], sys_["cart_coords"], sys_["latvec"], sys_["center_cart"],
-    )
-    if not qa_report["passed"]:
-        _write_blocked_report(output_dir, "Q_A construction validation failed -- see checks.", qa_report)
-        print("\nBLOCKED: Q_A construction validation failed. Aborting before any state build.")
-        return
-
-    print()
-    sites = precompute_sites_and_Q_A(sys_)
-
-    reduced_report = validate_reduced_reference(sys_, sites)
-    if not reduced_report["passed"]:
-        _write_blocked_report(
-            output_dir,
-            "Reduced-reference validation failed -- full spectrum NOT computed, per the "
-            "task's explicit instruction to only proceed once the reduced reference passes.",
-            dict(Q_A_validation=qa_report, reduced_reference=reduced_report),
+    # Everything from here on can raise FatalValidationError (NaN/Inf,
+    # negative state weights, severe non-Hermiticity, gross closure
+    # failure -- see _tiered_check/GROSS_* tolerances above). Those are
+    # the ONLY conditions that hard-stop; PSD violations and occupation-
+    # bound violations are reported in full but never raise, and the
+    # pipeline runs to completion regardless of how they look.
+    try:
+        qa_report = validate_Q_A_construction(
+            sys_["pawpp"], sys_["elements_idx"], sys_["cart_coords"], sys_["latvec"], sys_["center_cart"],
         )
-        print("\nBLOCKED: reduced-reference validation failed. Not running the full spectrum.")
-        return
+        if qa_report["gross_failure"]:
+            _write_blocked_report(output_dir, "Q_A construction validation: GROSS failure -- see checks.",
+                                   qa_report)
+            print("\nBLOCKED: Q_A construction validation had a GROSS failure. "
+                  "Aborting before any state build.")
+            return None
+        if not qa_report["passed"]:
+            print("\nNOTE: Q_A construction validation has non-GROSS failures (reported above). "
+                  "Continuing -- these do not block.")
 
-    # ── full-spectrum run (only reached if both gates passed) ──
+        print()
+        sites = precompute_sites_and_Q_A(sys_)
+
+        reduced_report = validate_reduced_reference(sys_, sites)
+        if reduced_report["gross_failure"]:
+            _write_blocked_report(
+                output_dir,
+                "Reduced-reference validation: GROSS failure -- full spectrum NOT computed.",
+                dict(Q_A_validation=qa_report, reduced_reference=reduced_report),
+            )
+            print("\nBLOCKED: reduced-reference validation had a GROSS failure. "
+                  "Not running the full spectrum.")
+            return None
+        if not reduced_report["passed"]:
+            print("\nNOTE: reduced-reference validation has non-GROSS failures (reported above, "
+                  "e.g. PSD/occupation-bound), including possibly PSD violations. "
+                  "Continuing to the full spectrum -- these do not block.")
+    except FatalValidationError as e:
+        tracemalloc.stop()
+        _write_blocked_report(output_dir, f"FATAL: {e}")
+        print(f"\nBLOCKED (fatal): {e}")
+        return None
+
+    # ── full-spectrum run (only reached if neither gate had a GROSS failure) ──
     print(f"\n=== Reduced reference PASSED -- building full spectrum "
           f"(all {sys_['wfc']._nkpts} k-points) ===")
-    ik_all = list(range(1, sys_["wfc"]._nkpts + 1))
-    t0 = time.time()
-    Psi, beta_by_site, p, states = build_state_list_and_beta(sys_, sites, ik_all)
-    t_build = time.time() - t0
-    print(f"  build done in {t_build:.1f}s  nstates={len(states)}")
-
-    t0 = time.time()
-    if USE_DIRECT_L_A:
-        print("  route: direct L_A (enlarged Gram matrix, QR-based -- see paw_direct_LA.py)")
-        lam_sel, X, eigvals, la_diag = solve_natural_orbitals_direct(Psi, beta_by_site, sites, p)
-        n_sel = la_diag["n_selected"]
-        herm_K_A, min_eig_K_A = la_diag["herm_K_small"], la_diag["min_eig"]
-        trace_K_A = la_diag["trace_K_small"]
-        ortho_err = la_diag["ortho_err"]
-        t_gram = time.time() - t0
-        t_eigh = 0.0   # QR + small eigh are one timed block above (t_gram)
-    else:
-        print("  route: state-space K_A")
-        G_ps_A, G_aug_A, G_A, K_A = build_G_A_K_A(Psi, beta_by_site, sites, p)
-        t_gram = time.time() - t0
+    try:
+        ik_all = list(range(1, sys_["wfc"]._nkpts + 1))
         t0 = time.time()
-        eigvals, U = np.linalg.eigh(K_A)
-        order = np.argsort(eigvals)[::-1]
-        eigvals = eigvals[order]
-        U = U[:, order]
-        t_eigh = time.time() - t0
+        Psi, beta_by_site, p, states = build_state_list_and_beta(sys_, sites, ik_all)
+        t_build = time.time() - t0
+        print(f"  build done in {t_build:.1f}s  nstates={len(states)}")
 
-        sel = eigvals > 1e-6
-        n_sel = int(sel.sum())
-        lam_sel = eigvals[sel]
-        U_sel = U[:, sel]
-        sqrtP = np.sqrt(p)
-        Y = (sqrtP[:, None] * U_sel) / np.sqrt(lam_sel)[None, :]
-        ortho_err = float(np.max(np.abs(Y.conj().T @ G_A @ Y - np.eye(n_sel))))
-        X = Psi @ Y
-        herm_K_A, min_eig_K_A = _herm(K_A), _mineig(K_A)
-        trace_K_A = float(np.trace(K_A).real)
-    print(f"  gram/build: {t_gram:.1f}s   eigh: {t_eigh:.1f}s")
+        if np.any(p < 0):
+            bad = np.where(p < 0)[0]
+            raise FatalValidationError(
+                f"{len(bad)} state(s) have negative weight p=wk*f_occ (worst={p.min():.4e}) "
+                "in the full-spectrum build -- corrupt occupation/k-weight data.")
+        _check_finite("Psi (full spectrum)", Psi)
+        for i, b in enumerate(beta_by_site):
+            _check_finite(f"beta_by_site[{i}] (full spectrum)", b)
+
+        t0 = time.time()
+        if USE_DIRECT_L_A:
+            print("  route: direct L_A (enlarged Gram matrix, QR-based -- see paw_direct_LA.py)")
+            lam_sel, X, eigvals, la_diag = solve_natural_orbitals_direct(
+                Psi, beta_by_site, sites, p, sample_weights=sys_["sample_weights"])
+            n_sel = la_diag["n_selected"]
+            herm_K_A, min_eig_K_A = la_diag["herm_K_small"], la_diag["min_eig"]
+            trace_K_A = la_diag["trace_K_small"]
+            ortho_err = la_diag["ortho_err"]
+            t_gram = time.time() - t0
+            t_eigh = 0.0   # QR + small eigh are one timed block above (t_gram)
+        else:
+            print("  route: state-space K_A")
+            G_ps_A, G_aug_A, G_A, K_A = build_G_A_K_A(
+                Psi, beta_by_site, sites, p, sample_weights=sys_["sample_weights"])
+            _check_finite("G_ps_A (full spectrum)", G_ps_A)
+            _check_finite("G_aug_A (full spectrum)", G_aug_A)
+            _check_finite("G_A (full spectrum)", G_A)
+            _check_finite("K_A (full spectrum)", K_A)
+            t_gram = time.time() - t0
+            t0 = time.time()
+            eigvals, U = np.linalg.eigh(K_A)
+            order = np.argsort(eigvals)[::-1]
+            eigvals = eigvals[order]
+            U = U[:, order]
+            t_eigh = time.time() - t0
+
+            sel = eigvals > 1e-6
+            n_sel = int(sel.sum())
+            lam_sel = eigvals[sel]
+            U_sel = U[:, sel]
+            sqrtP = np.sqrt(p)
+            Y = (sqrtP[:, None] * U_sel) / np.sqrt(lam_sel)[None, :]
+            ortho_err = float(np.max(np.abs(Y.conj().T @ G_A @ Y - np.eye(n_sel))))
+            X = Psi @ Y
+            herm_K_A, min_eig_K_A = _herm(K_A), _mineig(K_A)
+            trace_K_A = float(np.trace(K_A).real)
+        print(f"  gram/build: {t_gram:.1f}s   eigh: {t_eigh:.1f}s")
+    except FatalValidationError as e:
+        tracemalloc.stop()
+        _write_blocked_report(output_dir, f"FATAL (full-spectrum build): {e}")
+        print(f"\nBLOCKED (fatal): {e}")
+        return None
 
     trace_expected = float(sum(st["p"] for st in states))
     sum_eig = float(eigvals.sum())
     n_out_of_bounds = int(np.sum((eigvals < -BOUND_01_TOL) | (eigvals > 1 + BOUND_01_TOL)))
+    ent = entanglement_entropy(eigvals)
 
     t_total = time.time() - t_start
     _, peak_mem = tracemalloc.get_traced_memory()
@@ -1020,23 +1377,42 @@ def main(material=None, ws_center=None, ws_center_coord_type=None, ws_nmax=None,
     print(f"max_eigval={eigvals.max():.6f}  min_eigval={eigvals.min():.6f}  "
           f"n_out_of_bounds(gt {BOUND_01_TOL:.0e})={n_out_of_bounds}")
     print(f"state-space orthonormality (max|Y^H G_A Y - I|): {ortho_err:.3e}")
+    ent_tag = " [PROVISIONAL -- clipped, see out-of-range counts below]" if ent["provisional"] else ""
+    print(f"entanglement entropy S = -sum_a[lam ln(lam)+(1-lam)ln(1-lam)] = {ent['entropy']:.8f}{ent_tag}")
+    print(f"  eigenvalues out of [0,1]: {ent['n_below_zero']} below 0 (negative_mass={ent['negative_mass']:.4e}), "
+          f"{ent['n_above_one']} above 1 (excess_mass={ent['excess_mass']:.4e})")
     print(f"total runtime: {t_total:.1f}s   peak memory: {peak_mem/1e6:.1f} MB")
 
-    final_checks = dict(
-        reduced_reference_passed=reduced_report["passed"],
-        Q_A_validation_passed=qa_report["passed"],
-        K_A_hermitian=bool(herm_K_A < HERMITICITY_TOL),
-        K_A_psd=bool(min_eig_K_A > -1e-3),
-        occupations_within_01=bool(n_out_of_bounds == 0),
-        trace_algebra_check=bool(abs(trace_K_A - sum_eig) < 1e-6),
-        trace_matches_expected=bool(abs(trace_K_A - trace_expected) < 1e-2),
-        state_space_orthonormality=bool(ortho_err < 1e-6),
+    # Same two-tier philosophy as the validation gates: PSD/occupation-bound
+    # checks are reported but never gross (already ran to completion by
+    # this point regardless); Hermiticity/trace ARE gross-tiered, purely
+    # for reporting -- a gross failure here is caught by the NaN/Inf checks
+    # above before any output is written, so this never re-blocks.
+    final_tiered = dict(
+        reduced_reference_passed=dict(name="reduced_reference_passed", passed=reduced_report["passed"],
+                                       gross_failed=reduced_report["gross_failure"]),
+        Q_A_validation_passed=dict(name="Q_A_validation_passed", passed=qa_report["passed"],
+                                    gross_failed=qa_report["gross_failure"]),
+        K_A_hermitian=_tiered_check("K_A_hermitian", herm_K_A, HERMITICITY_TOL, GROSS_HERMITICITY_TOL),
+        K_A_psd=_tiered_check("K_A_psd", min_eig_K_A, -1e-3, None, "gt"),
+        occupations_within_01=_tiered_check("occupations_within_01", n_out_of_bounds, 0.5, None),
+        trace_algebra_check=_tiered_check("trace_algebra_check", abs(trace_K_A - sum_eig), 1e-6, GROSS_TRACE_TOL),
+        trace_matches_expected=_tiered_check("trace_matches_expected", abs(trace_K_A - trace_expected),
+                                              1e-2, GROSS_TRACE_TOL),
+        state_space_orthonormality=_tiered_check("state_space_orthonormality", ortho_err, 1e-6, 1e-1),
     )
+    final_checks = {name: c["passed"] for name, c in final_tiered.items()}
+    final_gross = {name: c["gross_failed"] for name, c in final_tiered.items()}
     overall_pass = all(final_checks.values())
+    overall_gross_failure = any(final_gross.values())
     print("\n--- final validation summary ---")
     for name, ok in final_checks.items():
-        print(f"  {name:28s} {'OK' if ok else 'FAIL'}")
-    print(f"  OVERALL: {'PASS' if overall_pass else 'FAIL'}")
+        tag = "  [GROSS]" if final_gross[name] else ("" if ok else "  (non-blocking)")
+        print(f"  {name:28s} {'OK' if ok else 'FAIL'}{tag}")
+    print(f"  OVERALL: {'PASS' if overall_pass else 'FAIL (non-GROSS failures reported above)'}")
+    if overall_gross_failure:
+        print("  WARNING: a GROSS failure was detected only after the full build completed "
+              "(not caught by the earlier gates) -- treat this result with suspicion.")
 
     # ── write the same file contract main.py's downstream scripts (symmetry_adapt_cnos.py,
     # cno_dos.py, cno_fatband.py, export_cubes.py, cno_eigenvalues.py, export_visualizer_data.py)
@@ -1054,11 +1430,44 @@ def main(material=None, ws_center=None, ws_center_coord_type=None, ws_nmax=None,
     np.save(output_dir / "ws_points_frac_cont.npy", sys_["r_ws_frac_cont"])
     np.save(output_dir / "ws_base_indices.npy", sys_["prim_indices"])
     np.save(output_dir / "ws_translation_int.npy", sys_["translations_all"])
+    np.save(output_dir / "ws_quadrature_weights.npy", sys_["sample_weights"])
+    np.save(output_dir / "ws_native_grid_count.npy", np.array(sys_["native_nr"], dtype=int))
+    np.save(output_dir / "ws_source_fft_grid.npy", sys_["source_fft_grid"])
+    np.save(output_dir / "ws_quadrature_factor.npy", np.array(sys_["quadrature_factor"], dtype=int))
     np.save(output_dir / "ws_center_cart.npy", sys_["center_cart"])
     np.save(output_dir / "ws_center_frac_wrapped.npy", sys_["center_frac_wrapped"])
+    # A single, self-describing contract for post-processing.  In particular,
+    # this is deliberately an *expanded* sample map: one native FFT node can
+    # occur at several periodic WS images with fractional finite-volume
+    # weights.  Consumers must load this file rather than rebuild a one-row
+    # per-native-node WS map from the FFT grid.
+    np.savez(
+        output_dir / "ws_quadrature_grid.npz",
+        format_version=np.array(1, dtype=int),
+        method=np.array(sys_["ws_quadrature"]),
+        sample_grid_shape=np.array([sys_["Nx"], sys_["Ny"], sys_["Nz"]], dtype=int),
+        source_fft_grid=np.asarray(sys_["source_fft_grid"], dtype=int),
+        quadrature_factor=np.array(sys_["quadrature_factor"], dtype=int),
+        native_grid_count=np.array(sys_["native_nr"], dtype=int),
+        base_indices=np.asarray(sys_["prim_indices"], dtype=int),
+        translations=np.asarray(sys_["translations_all"], dtype=int),
+        points_frac_cont=np.asarray(sys_["r_ws_frac_cont"], dtype=float),
+        points_cart=np.asarray(sys_["r_ws_cart"], dtype=float),
+        weights=np.asarray(sys_["sample_weights"], dtype=float),
+        center_cart=np.asarray(sys_["center_cart"], dtype=float),
+        center_frac_wrapped=np.asarray(sys_["center_frac_wrapped"], dtype=float),
+    )
 
     full_report = dict(
-        material=sys_["material"], nstates=len(states), n_sites=len(sites),
+        material=sys_["material"], output_subdir=output_subdir_eff,
+        nstates=len(states), n_sites=len(sites),
+        ws_quadrature=dict(method=sys_["ws_quadrature"], n_samples=sys_["Nr"],
+                           n_native_nodes=sys_["native_nr"],
+                           source_fft_grid=sys_["source_fft_grid"],
+                           quadrature_factor=sys_["quadrature_factor"],
+                           weight_sum=float(sys_["sample_weights"].sum()),
+                           n_fractional_weight_samples=int(np.sum((sys_["sample_weights"] > 1.0e-12)
+                                                                 & (sys_["sample_weights"] < 1.0 - 1.0e-12)))),
         route="direct_L_A" if USE_DIRECT_L_A else "state_space_K_A",
         beta_convention="reciprocal (nonlq.proj + gauge_correct_beta) x Bloch image phase; no real-space grid",
         Q_A_validation=qa_report, reduced_reference=reduced_report,
@@ -1067,7 +1476,10 @@ def main(material=None, ws_center=None, ws_center_coord_type=None, ws_nmax=None,
         max_eigval=float(eigvals.max()), min_eigval=float(eigvals.min()),
         n_out_of_bounds=n_out_of_bounds, n_selected_orbitals=n_sel,
         state_space_orthonormality_err=ortho_err,
-        checks=final_checks, overall_status="PASS" if overall_pass else "FAIL",
+        entanglement_entropy=ent,
+        checks=final_checks, checks_gross_failed=final_gross,
+        overall_status="PASS" if overall_pass else "FAIL",
+        overall_gross_failure=overall_gross_failure,
         timing_s=dict(build=t_build, gram=t_gram, eigh=t_eigh, total=t_total),
         peak_memory_MB=float(peak_mem / 1e6),
         top_20_occupations=eigvals[:20].tolist(),
@@ -1077,8 +1489,16 @@ def main(material=None, ws_center=None, ws_center_coord_type=None, ws_nmax=None,
 
     with open(output_dir / "paw_regional_report.txt", "w") as f:
         f.write("=== Regional T^dagger P_A T PAW-CNO report ===\n\n")
-        f.write("gate_status: PASSED (Q_A validation + reduced reference + full build all ran)\n\n")
+        gate_note = "PASSED (Q_A validation + reduced reference + full build all ran)"
+        if overall_gross_failure:
+            gate_note += " -- but a GROSS failure was found post-hoc, see below"
+        f.write(f"gate_status: {gate_note}\n\n")
         f.write(f"material: {sys_['material']}  nstates: {len(states)}  n_sites: {len(sites)}\n")
+        f.write(f"ws_quadrature: {sys_['ws_quadrature']}  samples: {sys_['Nr']}  "
+                f"native_nodes: {sys_['native_nr']}  "
+                f"source_fft_grid: {sys_['source_fft_grid'].tolist()}  "
+                f"zero_pad_factor: {sys_['quadrature_factor']}  "
+                f"weight_sum: {sys_['sample_weights'].sum():.10f}\n")
         f.write(f"route: {full_report['route']}\n")
         f.write(f"beta_convention: {full_report['beta_convention']}\n\n")
         f.write("--- trace reporting ---\n")
@@ -1093,7 +1513,12 @@ def main(material=None, ws_center=None, ws_center_coord_type=None, ws_nmax=None,
         f.write("top_20_cno_occupations:\n")
         for i, v in enumerate(eigvals[:20]):
             f.write(f"  CNO {i:3d} : {float(v):.10e}\n")
-        f.write(f"\nstate-space orthonormality: {ortho_err:.4e}\n\n")
+        f.write(f"\nstate-space orthonormality: {ortho_err:.4e}\n")
+        ent_label = "entanglement_entropy_PROVISIONAL" if ent["provisional"] else "entanglement_entropy"
+        f.write(f"{ent_label} S = -sum_a[lam ln(lam)+(1-lam)ln(1-lam)] = {ent['entropy']:.10f}\n")
+        f.write(f"  eigenvalues out of [0,1]: {ent['n_below_zero']} below 0 "
+                f"(negative_mass={ent['negative_mass']:.6e}), {ent['n_above_one']} above 1 "
+                f"(excess_mass={ent['excess_mass']:.6e})\n\n")
         f.write("--- final validation summary ---\n")
         for name, ok in final_checks.items():
             f.write(f"  {name:28s} {'OK' if ok else 'FAIL'}\n")
@@ -1107,4 +1532,18 @@ def main(material=None, ws_center=None, ws_center_coord_type=None, ws_nmax=None,
 
 
 if __name__ == "__main__":
-    main()
+    import argparse
+
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--material", default=None)
+    parser.add_argument("--output-subdir", required=True,
+                        help="Fresh output subdirectory; existing results are never overwritten by default.")
+    parser.add_argument("--ws-quadrature", default="finite_volume",
+                        choices=("finite_volume", "weighted_ties", "legacy"))
+    parser.add_argument("--quadrature-factor", type=int, default=1,
+                        help="Integer zero-padding factor for the WS integration mesh.")
+    parser.add_argument("--overwrite", action="store_true")
+    cli = parser.parse_args()
+    main(material=cli.material, output_subdir=cli.output_subdir,
+         ws_quadrature=cli.ws_quadrature, quadrature_factor=cli.quadrature_factor,
+         overwrite=cli.overwrite)

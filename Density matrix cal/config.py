@@ -9,17 +9,32 @@ LSORBIT  = False   # True for non-collinear (SOC) calculations, False otherwise
 # All scripts write to  Data/<MATERIAL>/output/<OUTPUT_SUBDIR>/
 # Change this to keep different parameter runs side-by-side, e.g. "original",
 # "isym0", "ws_bond".  Never leave it empty — every run needs a name.
-OUTPUT_SUBDIR = "W_center_2"
+OUTPUT_SUBDIR = "W_center_finite_volume_native"
+
+# Select the regional metric.  ``False`` is the direct pseudo-WAVECAR route;
+# ``True`` adds the PAW regional augmentation correction.  Before enabling
+# PAW, run ``check_paw_augmentation_needed.py`` for this material/WS centre.
+# WSe2_mono at the W-centred WS region has augmentation spheres crossing the
+# regional boundary (verified by check_paw_augmentation_needed.py), so its
+# current production configuration needs the PAW route.  Set False for a
+# material/centre whose pre-check says regional augmentation is unnecessary.
+USE_PAW_AUGMENTATION = True
+
+# The physical regional quadrature used by BOTH metric choices.  ``finite_volume``
+# clips the sampling-lattice voxels against the continuous WS polyhedron;
+# factor > 1 evaluates the same plane-wave basis on a denser grid.
+WS_QUADRATURE = "finite_volume"
+WS_QUADRATURE_FACTOR = 1
 
 # ── density matrix settings ───────────────────────────────────────────────────
 ISPIN = 1                      # 1 = spin-up / non-spin-polarised,  2 = spin-down
 
-RESTRICT_TO_FERMI_WINDOW = False   # True = include only bands within ±FERMI_WINDOW_EV of EFERMI
+RESTRICT_TO_FERMI_WINDOW = True   # True = include only bands within ±FERMI_WINDOW_EV of EFERMI
 EFERMI          = -2.229           # Fermi energy (eV); used only when RESTRICT_TO_FERMI_WINDOW = True
-FERMI_WINDOW_EV = 5.0              # half-width of the energy window (eV)
+FERMI_WINDOW_EV = 3.0              # half-width of the energy window (eV)
 
 # ── Wigner-Seitz cell settings ────────────────────────────────────────────────
-USE_WS_CELL = False
+USE_WS_CELL = True
 
 # Manual WS center. Do not implement automatic symmetry/Wyckoff/bond selection yet.
 # Later another module will compute this coordinate and pass it in.

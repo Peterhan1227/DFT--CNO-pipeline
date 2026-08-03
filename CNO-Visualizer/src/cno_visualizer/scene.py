@@ -31,6 +31,7 @@ from cno_visualizer.crystal import (
     build_atom_glyphs,
     build_bond_glyphs,
     build_bonded_crystal,
+    build_local_bonded_crystal,
     replicated_cell_edges,
 )
 from cno_visualizer.data import CNOData
@@ -71,6 +72,14 @@ class Viewer:
                 "view_mode='ws' requested but data is not WS-enabled; using crystal view."
             )
             state.view_mode = "crystal"
+        if data.expanded_ws:
+            # This field is one physical finite-volume WS sample set.  It is
+            # not a periodic cube, so a replicated crystal contour would be a
+            # visualization artefact.  Keep the regional view and its exact
+            # WS boundary as the default.
+            state.view_mode = "ws"
+            state.show_axes = False
+            state.show_cells = False
 
         self.plotter = pv.Plotter(off_screen=state.off_screen)
         self.actors: Dict[str, object] = {}
@@ -90,6 +99,8 @@ class Viewer:
         self._build_volume()
         self._refresh_after_cno_change()
         self._build_crystal_context()
+        if data.expanded_ws:
+            self._focus_expanded_ws()
 
         if state.show_axes:
             self.plotter.show_axes()
@@ -127,14 +138,17 @@ class Viewer:
             )
 
     def _build_crystal_context(self) -> None:
-        # Primitive-cell boundaries (replicated).
-        edges = replicated_cell_edges(
-            self.data.lattice, self.state.replication, origin=np.zeros(3)
-        )
-        self._add_named_actor(
-            "cell_edges", edges, color="grey", line_width=1.5,
-            opacity=0.6, visible=self.state.show_cells,
-        )
+        # A large slab primitive cell is not useful context for a local WS
+        # orbital (it is dominated by vacuum).  The WS boundary and local atom
+        # cluster below replace it in expanded finite-volume mode.
+        if not self.data.expanded_ws:
+            edges = replicated_cell_edges(
+                self.data.lattice, self.state.replication, origin=np.zeros(3)
+            )
+            self._add_named_actor(
+                "cell_edges", edges, color="grey", line_width=1.5,
+                opacity=0.6, visible=self.state.show_cells,
+            )
 
         # WS polyhedron overlay (centred at ws_center).
         if self._caches.ws_geometry is not None:
@@ -160,27 +174,72 @@ class Viewer:
 
     def _build_atoms_and_bonds(self) -> None:
         """Build atoms + a fully-connected periodic bond network (halo-aware)."""
-        draw_pos, draw_sym, bonds = build_bonded_crystal(
-            self.data.atom_symbols,
-            self.data.atoms_cart,
-            self.data.lattice,
-            self.state.replication,
-            bond_scale=self.state.bond_scale,
-        )
-        atom_mesh, atom_rgb = build_atom_glyphs(draw_pos, draw_sym)
+        if self.data.expanded_ws:
+            assert self.data.ws_center_cart is not None
+            draw_pos, draw_sym, bonds = build_local_bonded_crystal(
+                self.data.atom_symbols,
+                self.data.atoms_cart,
+                self.data.lattice,
+                self.data.ws_center_cart,
+                radius=3.1,
+                bond_scale=self.state.bond_scale,
+            )
+            atom_scale = 0.22
+        else:
+            draw_pos, draw_sym, bonds = build_bonded_crystal(
+                self.data.atom_symbols,
+                self.data.atoms_cart,
+                self.data.lattice,
+                self.state.replication,
+                bond_scale=self.state.bond_scale,
+            )
+            atom_scale = 0.40
+        atom_mesh, atom_rgb = build_atom_glyphs(draw_pos, draw_sym, radius_scale=atom_scale)
         if atom_mesh.n_points:
             self._add_named_actor(
                 "atoms", atom_mesh, scalars=atom_rgb, rgb=True,
                 visible=self.state.show_atoms, preference="cell",
                 pbr=True, metallic=0.15, roughness=0.45,
             )
-        bond_mesh = build_bond_glyphs(draw_pos, bonds)
+        bond_mesh = build_bond_glyphs(
+            draw_pos, bonds, radius=0.05 if self.data.expanded_ws else 0.08
+        )
         if bond_mesh.n_points:
             self._add_named_actor(
                 "bonds", bond_mesh, color=(0.55, 0.55, 0.58),
                 visible=self.state.show_bonds,
                 pbr=True, metallic=0.2, roughness=0.5,
+                opacity=0.62 if self.data.expanded_ws else 1.0,
             )
+
+    def _focus_expanded_ws(self) -> None:
+        """Start a slab WS viewer close enough to read the local orbital.
+
+        The full WS prism includes the vacuum height and can be inspected with
+        the regular ``0`` reset key.  The useful first view instead centres the
+        orbital and its nearest coordination shell while retaining the local
+        WS-boundary edges in frame.
+        """
+        surface = self._caches.current_surface
+        if surface is None or surface.n_points == 0 or self.data.ws_center_cart is None:
+            return
+        bounds = np.asarray(surface.bounds, dtype=np.float64)
+        orbital_extent = 0.5 * float(np.linalg.norm([
+            bounds[1] - bounds[0], bounds[3] - bounds[2], bounds[5] - bounds[4]
+        ]))
+        extent = max(3.4, orbital_extent + 0.8)
+        center = np.asarray(self.data.ws_center_cart, dtype=np.float64)
+        axis = np.array([0.0, 0.0, 1.0])
+        side = np.cross(axis, np.array([0.0, 1.0, 0.0]))
+        view = axis * 0.60 + side
+        view /= np.linalg.norm(view)
+        self.plotter.camera.position = tuple(center + view * (4.0 * extent))
+        self.plotter.camera.focal_point = tuple(center)
+        self.plotter.camera.up = tuple(axis)
+        try:
+            self.plotter.renderer.reset_camera_clipping_range()
+        except Exception:
+            pass
 
     def _add_named_actor(self, name: str, mesh, *, visible: bool = True, **kwargs):
         if name in self.actors:
@@ -302,6 +361,11 @@ class Viewer:
     def set_view_mode(self, mode: str) -> None:
         """Switch between the ``crystal`` and ``ws`` views (rebuilds the volume)."""
         if mode not in ("crystal", "ws") or mode == self.state.view_mode:
+            return
+        if self.data.expanded_ws:
+            warnings.warn(
+                "Expanded finite-volume CNOs are displayed only in their physical WS region."
+            )
             return
         if mode == "ws" and self._caches.ws_geometry is None:
             warnings.warn("WS view unavailable: data is not WS-enabled.")

@@ -17,7 +17,7 @@ Normalization used by main.py:
   norm_factor = 1 / sqrt(Nr)    where Nr = Nx * Ny * Nz
   -> sum_j |psi_nk(s_j)|^2 = 1  (discrete, same as ifftn * sqrt(Nr))
 
-Physical normalization (used by main_v3.py):
+Physical normalization (used by the archived ``main_v3.py`` diagnostic):
   norm_factor = 1 / sqrt(Omega)  where Omega = unit-cell volume in Ang^3
   -> sum_j |psi_nk(r_j)|^2 * dV ≈ 1  (continuous-integral approximation)
 """

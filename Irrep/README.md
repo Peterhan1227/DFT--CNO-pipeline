@@ -106,4 +106,4 @@ cd C:\Users\hanziruopeter\miniconda3\envs\irrep\Lib\site-packages
 patch -p1 < path\to\Irrep\scripts\fix_complex_chars.patch
 ```
 
-Run `scripts/test_w_complex_chars.py` to confirm the fix is in place.
+Run `diagnostics/test_w_complex_chars.py` to confirm the fix is in place.

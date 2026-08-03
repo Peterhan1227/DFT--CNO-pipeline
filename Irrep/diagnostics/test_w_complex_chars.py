@@ -8,7 +8,7 @@ Before the patch in get_irreps_from_table() the bug returned W1(0.5)+W2(0.5)
 for every twofold-degenerate block at W because the phase sign was wrong.
 
 Run from the Irrep/ directory with:
-    python test_w_complex_chars.py
+    python diagnostics/test_w_complex_chars.py
 """
 
 import os

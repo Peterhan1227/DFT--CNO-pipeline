@@ -1,0 +1,4 @@
+# Local historical scripts only.  Keep the directory as a convenient archive,
+# but never add its contents to the repository again.
+*
+!.gitignore

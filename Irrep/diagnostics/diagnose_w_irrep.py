@@ -4,7 +4,7 @@ diagnose_w_irrep.py
 Standalone diagnostic for the W-point complex-character bug in the
 installed `irrep` package.  Run from the Irrep/ directory with:
 
-    python diagnose_w_irrep.py
+    python diagnostics/diagnose_w_irrep.py
 
 It loads the Si VASP calculation, finds the W k-point, and prints:
   1. Calculated char and char_refUC per degenerate block

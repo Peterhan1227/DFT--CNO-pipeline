@@ -7,6 +7,7 @@ occupations and need not follow a step function — they show how the total
 electron density is distributed across natural orbitals.
 """
 from pathlib import Path
+import os
 from config import MATERIAL, OUTPUT_SUBDIR
 
 import numpy as np
@@ -15,7 +16,8 @@ from matplotlib.ticker import MaxNLocator
 
 # ── paths ──────────────────────────────────────────────────────────────────────
 base_dir   = Path(__file__).resolve().parent
-output_dir = base_dir / "Data" / MATERIAL / "output" / OUTPUT_SUBDIR
+output_subdir = os.environ.get("CNO_OUTPUT_SUBDIR", OUTPUT_SUBDIR)
+output_dir = base_dir / "Data" / MATERIAL / "output" / output_subdir
 occ_file   = output_dir / "cno_occupations.npy"
 
 # ── load ───────────────────────────────────────────────────────────────────────

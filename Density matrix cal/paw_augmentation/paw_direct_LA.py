@@ -47,7 +47,8 @@ one.
 import numpy as np
 
 
-def solve_natural_orbitals_direct(Psi, beta_by_site, sites, p, occ_tol=1e-6):
+def solve_natural_orbitals_direct(Psi, beta_by_site, sites, p, occ_tol=1e-6,
+                                  sample_weights=None):
     """Exact alternative to build_G_A_K_A(...) + np.linalg.eigh(K_A).
 
     Parameters mirror paw_regional_cno.py's build_state_list_and_beta output:
@@ -72,6 +73,11 @@ def solve_natural_orbitals_direct(Psi, beta_by_site, sites, p, occ_tol=1e-6):
     """
     Nr, nstates = Psi.shape
     sqrtp = np.sqrt(p)
+    if sample_weights is None:
+        sample_weights = np.ones(Nr)
+    sample_weights = np.asarray(sample_weights, dtype=float)
+    if sample_weights.shape != (Nr,) or np.any(sample_weights < 0.0):
+        raise ValueError("sample_weights must be a nonnegative length-Nr array")
 
     B_blocks = []
     signs = []
@@ -90,7 +96,10 @@ def solve_natural_orbitals_direct(Psi, beta_by_site, sites, p, occ_tol=1e-6):
         B = np.zeros((0, nstates), dtype=Psi.dtype)
         j_aug = np.zeros(0)
 
-    Phi = np.concatenate([Psi, B], axis=0)         # (M, nstates)
+    # The QR route represents the same weighted pseudo inner product as
+    # Psi^H diag(sample_weights) Psi.  ``X`` below remains evaluated from the
+    # unscaled physical field Psi, not the quadrature-scaled embedding.
+    Phi = np.concatenate([np.sqrt(sample_weights)[:, None] * Psi, B], axis=0)
     j = np.concatenate([np.ones(Nr), j_aug])       # (M,)
     Phi_p = Phi * sqrtp[None, :]
 

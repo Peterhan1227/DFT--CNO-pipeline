@@ -1,0 +1,3 @@
+# Diagnostic reports are generated locally; retain source diagnostics only.
+*
+!.gitignore

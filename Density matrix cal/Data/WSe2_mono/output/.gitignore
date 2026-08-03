@@ -1,0 +1,5 @@
+# Calculation outputs are material-local and can be regenerated.  Individual
+# historical output directories that were already tracked are unaffected.
+*
+!.gitignore
+!*/

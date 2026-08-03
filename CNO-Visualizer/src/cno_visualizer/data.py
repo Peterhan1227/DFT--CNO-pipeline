@@ -95,6 +95,17 @@ class CNOData:
         return int(self.cno_values.shape[1])
 
     @property
+    def expanded_ws(self) -> bool:
+        """Whether this WS field has more samples than one periodic FFT cube.
+
+        A finite-volume WS quadrature may retain distinct unwrapped images of a
+        boundary FFT node.  Those rows cannot be folded back to a single
+        ``grid_shape`` cube without losing data, so the renderer must use the
+        saved unwrapped connectivity instead.
+        """
+        return bool(self.ws_enabled and self.n_points != int(np.prod(self.grid_shape)))
+
+    @property
     def cell_volume(self) -> float:
         return float(abs(np.linalg.det(self.lattice)))
 
@@ -217,6 +228,124 @@ class CNOData:
             source_path=None,
         )
 
+    @classmethod
+    def from_ws_arrays(
+        cls,
+        cno_values: np.ndarray,
+        grid_shape,
+        lattice: np.ndarray,
+        *,
+        base_indices: np.ndarray,
+        translations: np.ndarray,
+        ws_center_cart: np.ndarray,
+        points_frac_cont: Optional[np.ndarray] = None,
+        points_cart: Optional[np.ndarray] = None,
+        atom_symbols=None,
+        atom_numbers=None,
+        atoms_frac: Optional[np.ndarray] = None,
+        atoms_cart: Optional[np.ndarray] = None,
+        cno_occupations: Optional[np.ndarray] = None,
+        cno_indices: Optional[np.ndarray] = None,
+        material: Optional[str] = None,
+    ) -> "CNOData":
+        """Build a WS-mode object from saved CNO rows and their explicit map.
+
+        Unlike :meth:`from_arrays`, the sample count need not equal
+        ``prod(grid_shape)``.  This is the required representation for the
+        expanded, finite-volume WS quadrature: every CNO row keeps its own
+        unwrapped FFT image rather than being folded into a periodic cube.
+        """
+        cv = np.asarray(cno_values)
+        if cv.ndim == 1:
+            cv = cv[None, :]
+        cv = np.ascontiguousarray(cv, dtype=np.complex128)
+        if cv.ndim != 2 or not np.all(np.isfinite(cv.view(np.float64))):
+            raise CNODataError("cno_values must be a finite one- or two-dimensional complex array")
+        grid_shape = np.asarray(grid_shape, dtype=np.int64).reshape(3)
+        lattice = np.asarray(lattice, dtype=np.float64).reshape(3, 3)
+        if np.any(grid_shape <= 0) or abs(float(np.linalg.det(lattice))) < 1e-10:
+            raise CNODataError("grid_shape must be positive and lattice must be nonsingular")
+
+        n_cno, n_samples = cv.shape
+        base_indices = np.asarray(base_indices, dtype=np.int64)
+        translations = np.asarray(translations, dtype=np.int64)
+        if base_indices.shape != (n_samples, 3) or translations.shape != (n_samples, 3):
+            raise CNODataError("base_indices/translations must have shape (n_samples, 3)")
+        if np.any(base_indices < 0) or np.any(base_indices >= grid_shape[None, :]):
+            raise CNODataError("base_indices lie outside grid_shape")
+        frac = base_indices / grid_shape[None, :] + translations
+        if points_frac_cont is None:
+            points_frac_cont = frac
+        else:
+            points_frac_cont = np.asarray(points_frac_cont, dtype=np.float64)
+            if points_frac_cont.shape != (n_samples, 3) or not np.allclose(
+                points_frac_cont, frac, rtol=0.0, atol=2.0e-7
+            ):
+                raise CNODataError("points_frac_cont disagrees with base_indices/translations")
+        if points_cart is None:
+            points_cart = points_frac_cont @ lattice
+        else:
+            points_cart = np.asarray(points_cart, dtype=np.float64)
+            if points_cart.shape != (n_samples, 3) or not np.allclose(
+                points_cart, points_frac_cont @ lattice, rtol=0.0, atol=2.0e-7
+            ):
+                raise CNODataError("points_cart disagrees with points_frac_cont/lattice")
+        actual = base_indices + translations * grid_shape[None, :]
+        if len(np.unique(actual, axis=0)) != n_samples:
+            raise CNODataError("WS map contains duplicate unwrapped FFT samples")
+
+        syms = [] if atom_symbols is None else [str(s) for s in atom_symbols]
+        natoms = len(syms)
+        if atoms_cart is not None:
+            atoms_cart = np.asarray(atoms_cart, dtype=np.float64).reshape(-1, 3)
+            natoms = len(atoms_cart)
+        if atoms_frac is not None:
+            atoms_frac = np.asarray(atoms_frac, dtype=np.float64).reshape(-1, 3)
+            natoms = len(atoms_frac)
+        if atoms_cart is None and atoms_frac is not None:
+            atoms_cart = atoms_frac @ lattice
+        if atoms_frac is None and atoms_cart is not None:
+            atoms_frac = atoms_cart @ np.linalg.inv(lattice)
+        if atoms_cart is None:
+            atoms_cart = np.zeros((natoms, 3), dtype=np.float64)
+            atoms_frac = np.zeros((natoms, 3), dtype=np.float64)
+        if atom_numbers is None:
+            from ase.data import chemical_symbols
+
+            atom_numbers = np.asarray(
+                [chemical_symbols.index(s) if s in chemical_symbols else 0 for s in syms],
+                dtype=np.int64,
+            )
+        else:
+            atom_numbers = np.asarray(atom_numbers, dtype=np.int64)
+        if cno_occupations is None:
+            cno_occupations = np.zeros(n_cno, dtype=np.float64)
+        if cno_indices is None:
+            cno_indices = np.arange(n_cno, dtype=np.int64)
+
+        ws_center_cart = np.asarray(ws_center_cart, dtype=np.float64).reshape(3)
+        return cls(
+            format_version="cno-visualizer-v1",
+            material=material,
+            cno_values=cv,
+            cno_occupations=np.asarray(cno_occupations, dtype=np.float64),
+            cno_indices=np.asarray(cno_indices, dtype=np.int64),
+            grid_shape=grid_shape,
+            lattice=lattice,
+            atom_symbols=np.asarray(syms, dtype="<U4"),
+            atom_numbers=atom_numbers,
+            atoms_frac=np.asarray(atoms_frac, dtype=np.float64),
+            atoms_cart=np.asarray(atoms_cart, dtype=np.float64),
+            ws_enabled=True,
+            points_cart=np.asarray(points_cart, dtype=np.float64),
+            points_frac_cont=np.asarray(points_frac_cont, dtype=np.float64),
+            base_indices=base_indices,
+            translations=translations,
+            ws_center_cart=ws_center_cart,
+            ws_center_frac=ws_center_cart @ np.linalg.inv(lattice),
+            source_path=None,
+        )
+
     # ------------------------------------------------------------------ loader
     @classmethod
     def from_npz(cls, path: str | Path) -> "CNOData":
@@ -263,10 +392,11 @@ class CNOData:
             if np.any(grid_shape <= 0):
                 raise CNODataError(f"grid_shape must be positive, got {grid_shape}")
             expected_Nr = int(np.prod(grid_shape))
-            if cno_values.shape[1] != expected_Nr:
+            ws_enabled = bool(_scalar(np.asarray(arr["ws_enabled"])))
+            if not ws_enabled and cno_values.shape[1] != expected_Nr:
                 raise CNODataError(
                     f"cno_values.shape[1] = {cno_values.shape[1]} does not match "
-                    f"np.prod(grid_shape) = {expected_Nr}"
+                    f"np.prod(grid_shape) = {expected_Nr} for primitive data"
                 )
 
             cno_occupations = np.asarray(arr["cno_occupations"]).astype(np.float64)
@@ -318,8 +448,6 @@ class CNOData:
             if not np.all(np.isfinite(atoms_cart)):
                 raise CNODataError("atoms_cart contains NaN/infinite values.")
 
-            ws_enabled = bool(_scalar(np.asarray(arr["ws_enabled"])))
-
             (
                 points_cart,
                 points_frac_cont,
@@ -349,7 +477,7 @@ class CNOData:
                         np.float64
                     )
 
-                Nr = expected_Nr
+                Nr = int(cno_values.shape[1])
                 for name, a, shape in (
                     ("points_cart", points_cart, (Nr, 3)),
                     ("points_frac_cont", points_frac_cont, (Nr, 3)),
@@ -372,6 +500,8 @@ class CNOData:
                     raise CNODataError("points_cart contains NaN/infinite values.")
                 if not np.all(np.isfinite(points_frac_cont)):
                     raise CNODataError("points_frac_cont contains NaN/infinite values.")
+                if np.any(base_indices < 0) or np.any(base_indices >= grid_shape[None, :]):
+                    raise CNODataError("base_indices lie outside grid_shape.")
                 if not (
                     np.issubdtype(base_indices.dtype, np.integer)
                     and np.issubdtype(translations.dtype, np.integer)
@@ -379,6 +509,16 @@ class CNOData:
                     raise CNODataError(
                         "base_indices and translations must be integer arrays."
                     )
+                expected_frac = base_indices / grid_shape[None, :] + translations
+                if not np.allclose(points_frac_cont, expected_frac, rtol=0.0, atol=2.0e-7):
+                    raise CNODataError(
+                        "points_frac_cont disagrees with base_indices/translations."
+                    )
+                if not np.allclose(points_cart, points_frac_cont @ lattice, rtol=0.0, atol=2.0e-7):
+                    raise CNODataError("points_cart disagrees with points_frac_cont/lattice.")
+                actual = base_indices + translations * grid_shape[None, :]
+                if len(np.unique(actual, axis=0)) != Nr:
+                    raise CNODataError("WS map contains duplicate unwrapped FFT samples.")
 
             material: Optional[str] = None
             if "material" in keys:

@@ -21,7 +21,8 @@ Checks, per representative k-point and per material:
    same (gx%Nx, gy%Ny, gz%Nz) FFT grid point (would silently corrupt cg).
 4. Direct-Fourier agreement: the FFT-based psi matches an independent direct
    plane-wave sum (helper functions/direct_fourier.py), the same check
-   main_v2.py already performs, reused here as a regression diagnostic.
+   The archived main_v2.py experiment performed this directly; this is the
+   retained regression diagnostic.
 5. Bloch translation covariance: for the WS-cell grid, whose points are
    images of the primitive grid shifted by an integer lattice translation n
    (ws_cell.build_ws_grid_map), psi_ws(p) must equal

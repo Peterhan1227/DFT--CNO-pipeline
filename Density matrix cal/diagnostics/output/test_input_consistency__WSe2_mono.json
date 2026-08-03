@@ -22,8 +22,8 @@
     },
     "POTCAR": {
       "present": true,
-      "sha256": "7ef8b236d47cb52384021b0d5255b9dd2cd6fb636f1b7e0a093eff353b3a2a5c",
-      "size_bytes": 450832
+      "sha256": "b27eafd5c8723670a520903cc8c2e83238ad9335bf5845a09ba7e870baab4808",
+      "size_bytes": 467063
     },
     "POSCAR": {
       "present": true,

@@ -22,7 +22,7 @@ stored as zero-dimensional NumPy arrays (no pickle is needed to read them).
 | field                   | dtype              | shape           | notes                                                                |
 |-------------------------|--------------------|-----------------|----------------------------------------------------------------------|
 | `format_version`        | `<U…`              | `()`            | Must be `"cno-visualizer-v1"`.                                       |
-| `cno_values`            | `complex128`       | `(n_cno, Nr)`   | Rows are CNOs; `Nr = Nx*Ny*Nz`.                                      |
+| `cno_values`            | `complex128`       | `(n_cno, Nsample)` | Rows are CNOs; ordinary grids have `Nsample = Nx*Ny*Nz`, while finite-volume WS data may retain additional unwrapped boundary images. |
 | `cno_occupations`       | `float64`          | `(n_cno,)`      | Eigenvalue / occupation per CNO.                                     |
 | `cno_indices`           | `int64`            | `(n_cno,)`      | Original CNO numbers as shown to the user.                           |
 | `grid_shape`            | int                | `(3,)`          | `(Nx, Ny, Nz)`.                                                      |
@@ -163,18 +163,20 @@ where `|psi|` is numerically zero are rejected because the phase is undefined.
 
 ## How the orbital is rendered
 
-The orbital is always contoured on a **regular structured grid** that follows the
-(possibly non-orthogonal) lattice — never an irregular point cloud.  This matches
-what a cube viewer (VESTA) shows bit-for-bit.
+Ordinary data is contoured on a **regular structured grid** that follows the
+(possibly non-orthogonal) lattice, matching what a cube viewer (VESTA) shows.
+Finite-volume WS data with distinct unwrapped boundary images cannot be folded to
+that grid without overwriting samples.  It is instead contoured on an unstructured
+mesh of the complete saved FFT hexahedra; no exterior values are filled or averaged.
 
 * **Primitive data** (`ws_enabled = False`) — `cno_values` is the C-order
   flattening of the `(Nx, Ny, Nz)` FFT grid; the viewer builds a
   `pyvista.StructuredGrid` over the lattice and contours `|psi|²`.
-* **WS data** (`ws_enabled = True`) — `|CNO|²` is lattice-periodic, so the value
-  stored for WS representative point `q` is also the value at the regular grid
-  point `base_indices[q]`.  The viewer inverts `base_indices` into a lookup table
-  `G[ix, iy, iz] = q` and builds the **same** regular grid.  No Delaunay
-  tetrahedralization is used (it produced degenerate tets and a lumpy surface).
+* **One-to-one WS data** (`ws_enabled = True`, one saved row per FFT node) – the
+  viewer inverts `base_indices` into a lookup table and builds the same regular grid.
+* **Expanded finite-volume WS data** – every saved row stays at its true unwrapped
+  FFT position.  The viewer creates only hexahedra with all eight saved vertices;
+  it does not use Delaunay tetrahedra or a point-cloud surface.
 
 The contour interpolates `psi_real` and `psi_imag` to the surface vertices, and
 the wrapped phase is computed there — phase angles are never interpolated directly.
@@ -187,9 +189,10 @@ The **WS cell** is generated analytically from the lattice via
 * **`crystal`** (default) — the periodic isosurface contoured over `--replicate`
   primitive cells, with a one-layer wrap so lobes cross cell boundaries
   seamlessly.  This is the natural crystal picture and matches the cube.
-* **`ws`** — the same field contoured over a small block of cells and then
-  **clipped to the WS polyhedron** (via its active half-space planes), showing one
-  localized orbital inside its own cell.
+* **`ws`** – the field is **clipped to the analytic WS polyhedron** (via its active
+  half-space planes), showing one localized orbital inside its own cell.  Expanded
+  finite-volume CNOs use this physical regional view only and show nearby periodic
+  atoms as context without replicating the CNO itself.
 
 ## Periodic replicas and bonds
 

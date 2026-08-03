@@ -1,16 +1,19 @@
 import sys
+import os
 import numpy as np
 from pathlib import Path
 from config import MATERIAL, OUTPUT_SUBDIR
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "helper functions"))
 from ws_cell import read_poscar_structure
+from cno_quadrature import SavedCNOQuadrature
 
 
 # ── paths ─────────────────────────────────────────────────────────────────────
 base_dir    = Path(__file__).resolve().parent
 data_dir    = base_dir / "Data" / MATERIAL
 output_dir  = data_dir / "output" / OUTPUT_SUBDIR
+output_dir  = data_dir / "output" / os.environ.get("CNO_OUTPUT_SUBDIR", OUTPUT_SUBDIR)
 poscar_path = data_dir / "POSCAR"
 occ_file        = output_dir / "cno_occupations.npy"
 orb_file        = output_dir / "cno_orbitals.npy"
@@ -21,7 +24,7 @@ cube_dir.mkdir(parents=True, exist_ok=True)
 
 # Tile the output cube into an N×N×N supercell so VESTA shows the full crystal
 # without needing to change boundary settings.  Set to (1,1,1) for primitive only.
-CUBE_SUPERCELL = (3, 3, 3)
+CUBE_SUPERCELL = (2, 2, 1)
 
 manual_grid_shape = None
 
@@ -43,6 +46,8 @@ if manual_grid_shape is None and not grid_shape_file.exists():
 # ── load CNO data ─────────────────────────────────────────────────────────────
 eigvals = np.load(occ_file)
 eigvecs = np.load(orb_file)
+quadrature = SavedCNOQuadrature.load(output_dir)
+quadrature.validate_cno_rows(eigvecs)
 
 print(f"Loaded CNO occupations from : {occ_file}")
 print(f"Loaded CNO orbitals from    : {orb_file}")
@@ -54,7 +59,7 @@ if eigvecs.ndim != 2:
 
 Nr              = eigvecs.shape[0]
 n_cno_available = eigvecs.shape[1]
-n_export_cno    = min(10, n_cno_available)
+n_export_cno    = min(4, n_cno_available)
 
 if len(eigvals) < n_export_cno:
     raise ValueError(f"eigvals has only {len(eigvals)} entries, need {n_export_cno}")
@@ -64,15 +69,17 @@ if manual_grid_shape is not None:
     Nx, Ny, Nz = manual_grid_shape
     grid_source = "manual override"
 else:
-    Nx, Ny, Nz = np.load(grid_shape_file).astype(int)
-    grid_source = "fft_grid_shape.npy"
+    Nx, Ny, Nz = quadrature.sample_grid_shape
+    grid_source = "saved quadrature map"
 
-if Nx * Ny * Nz != Nr:
+if not quadrature.expanded and Nx * Ny * Nz != Nr:
     raise ValueError(
         f"Grid shape ({Nx}, {Ny}, {Nz}) gives {Nx * Ny * Nz} points, "
         f"but cno_orbitals.npy has Nr={Nr}."
     )
-print(f"Using grid shape ({grid_source}): ({Nx}, {Ny}, {Nz})   Nr = {Nr}")
+print(f"Using grid shape ({grid_source}): ({Nx}, {Ny}, {Nz})   samples = {Nr}")
+if quadrature.expanded:
+    print("Expanded regional map: exporting exact weighted samples, not an invented periodic cube.")
 
 # ── read POSCAR structure ─────────────────────────────────────────────────────
 latvec, species, counts, atom_symbols, atom_numbers, frac_coords, cart_coords = \
@@ -85,23 +92,11 @@ ws_mode = ws_enabled_file.exists() and bool(np.load(ws_enabled_file))
 print(f"WS mode: {ws_mode}")
 
 if ws_mode:
-    _ws_files = {
-        "ws_points_cart.npy": output_dir / "ws_points_cart.npy",
-    }
-    for fname, p in _ws_files.items():
-        if not p.exists():
-            raise FileNotFoundError(
-                f"WS mode is active but {fname} not found: {p}\n"
-                "Rerun Wavecar_to_Coeff.py to regenerate WS map files."
-            )
-    ws_points_cart = np.load(output_dir / "ws_points_cart.npy")
-    if len(ws_points_cart) != Nr:
-        raise ValueError(
-            f"ws_points_cart has {len(ws_points_cart)} points but Nr={Nr}."
-        )
-    print(f"Loaded ws_points_cart: shape={ws_points_cart.shape}")
-    _ws_base_path = output_dir / "ws_base_indices.npy"
-    ws_base_indices = np.load(_ws_base_path) if _ws_base_path.exists() else None
+    ws_points_cart = quadrature.points_cart
+    ws_base_indices = quadrature.base_indices
+    if ws_points_cart is None:
+        raise ValueError("WS cube/sample export requires saved Cartesian WS positions")
+    print(f"Loaded saved WS map: shape={ws_points_cart.shape}")
 
 
 # The Gaussian .cube format standard is BOHR — VESTA ignores any comment about
@@ -168,7 +163,33 @@ print(f"\nExporting top {n_export_cno} CNOs to: {cube_dir}")
 for i in range(n_export_cno):
     cno     = eigvecs[:, i]
     density = np.abs(cno) ** 2
-    density = density / density.sum()
+    density = density / np.dot(quadrature.weights, density)
+
+    if quadrature.expanded:
+        # A CNO built from several k-points is not generally periodic.  At an
+        # expanded WS boundary the same native-node index deliberately occurs
+        # at different translated positions and can have different values.
+        # A Gaussian cube has exactly one value per periodic primitive-grid
+        # node, so forcing this data into one would discard physical phase
+        # information.  Export the exact regional data instead.
+        sample_path = cube_dir / f"cno_{i:03d}_regional_samples.npz"
+        np.savez(
+            sample_path,
+            points_cart=quadrature.points_cart,
+            points_frac_cont=quadrature.points_frac_cont,
+            base_indices=quadrature.base_indices,
+            translations=quadrature.translations,
+            quadrature_weights=quadrature.weights,
+            density=density,
+            complex_values=cno,
+            occupation=np.array(eigvals[i]),
+            sample_grid_shape=np.asarray(quadrature.sample_grid_shape, dtype=int),
+            source_fft_grid=np.asarray(quadrature.source_fft_grid, dtype=int),
+            quadrature_method=np.array(quadrature.method),
+        )
+        print(f"  Exported exact regional samples: {sample_path.name} "
+              f"(occupation = {eigvals[i]:.6e})")
+        continue
 
     if ws_mode:
         # Save WS point cloud for any further analysis
@@ -220,9 +241,17 @@ with open(meta_path, "w") as f:
     f.write(f"grid shape source           : {grid_source}\n")
     f.write(f"Nr (flat grid points)       : {Nr}\n")
     f.write(f"ws_mode                     : {ws_mode}\n")
+    f.write(f"quadrature method           : {quadrature.method}\n")
+    f.write(f"quadrature samples          : {quadrature.n_samples}\n")
+    f.write(f"quadrature weight sum       : {quadrature.weights.sum():.10f}\n")
+    f.write(f"expanded quadrature         : {quadrature.expanded}\n")
     f.write(f"number of exported CNOs     : {n_export_cno}\n")
     f.write(f"cube output directory       : {cube_dir}\n")
-    if ws_mode:
+    if quadrature.expanded:
+        f.write("NOTE: no Gaussian cubes were written: an expanded CNO has multiple physical\n")
+        f.write("      periodic-image values at some native FFT indices. Exact weighted regional\n")
+        f.write("      samples were written as cno_*_regional_samples.npz instead.\n")
+    elif ws_mode:
         f.write("NOTE: WS mode — density back-mapped to primitive grid for cube export.\n")
         f.write("NOTE: WS point clouds also saved as .npz per CNO.\n")
     else:

@@ -16,6 +16,7 @@ from __future__ import annotations
 import os
 import sys
 from dataclasses import dataclass
+from pathlib import Path
 from config import MATERIAL, LSORBIT, OUTPUT_SUBDIR
 from typing import Optional
 
@@ -26,11 +27,14 @@ from matplotlib.colors import LinearSegmentedColormap
 from vaspwfc import vaspwfc
 from config import EFERMI
 
+sys.path.insert(0, str(Path(__file__).resolve().parent / "helper functions"))
+from cno_quadrature import SavedCNOQuadrature
+
 # ── user settings ─────────────────────────────────────────────────────────────
 ispin       = 1        # 1 = spin-up (or non-spin-polarised), 2 = spin-down
-cno_indices = list(range(0, 5))   # e.g. list(range(0, 9))  or  [1, 3, 4, 5]
+cno_indices = list(range(0, 7))   # e.g. list(range(0, 9))  or  [1, 3, 4, 5]
 efermi      = EFERMI
-ylim      = [-15, 15]
+ylim      = [-10, 5]
 cmap      = LinearSegmentedColormap.from_list("wt_red", ["white", "crimson"])
 linewidth = 2.5
 interpolate_for_plot      = False
@@ -43,34 +47,27 @@ interp_points_per_segment = 3
 # matches the fatband.  Set render_cno_3d = False to skip entirely.
 render_cno_3d    = True
 cno_3d_iso       = 0.5          # isosurface level as a fraction of max |psi|^2
-cno_3d_replicate = (2, 2, 2)    # primitive cells drawn around the orbital
+cno_3d_replicate = (2, 2, 1)    # primitive cells drawn around the orbital
 cno_3d_seconds     = 10.0        # clip length in seconds (camera turns the whole time)
 cno_3d_fps         = 15         # GIF frame rate (lower = smaller file)
 cno_3d_deg_per_sec = 12.0       # camera turn speed in deg/s (lower = slower)
 cno_3d_spin_axis   = "z"        # camera turns about this axis ("x"/"y"/"z")
 
 # ── paths ─────────────────────────────────────────────────────────────────────
-base_dir        = base_dir = __import__("pathlib").Path(__file__).resolve().parent
+base_dir        = Path(__file__).resolve().parent
 data_dir        = base_dir / "Data" / MATERIAL
-output_dir      = data_dir / "output" / OUTPUT_SUBDIR
+output_subdir   = os.environ.get("CNO_OUTPUT_SUBDIR", OUTPUT_SUBDIR)
+field_name      = os.environ.get("CNO_FIELD_FILE", "cno_orbitals.npy")
+output_dir      = data_dir / "output" / output_subdir
 wavecar_path    = data_dir / "WAVECAR_lm"
 kpoints_path    = data_dir / "KPOINTS"
 eigenval_path   = data_dir / "EIGENVAL_lm"
 poscar_path     = data_dir / "POSCAR"
-cno_orb_file    = output_dir / "cnos_sym_adapted.npy"
+cno_orb_file    = output_dir / field_name
 cno_occ_file    = output_dir / "cno_occupations.npy"
 grid_shape_file = output_dir / "fft_grid_shape.npy"
 fatband_dir     = output_dir / "cno_fatband"
 fatband_dir.mkdir(parents=True, exist_ok=True)
-
-# ── WS mode setup ─────────────────────────────────────────────────────────────
-# In WS mode the CNO vector is ordered by WS grid points.  The line-mode Bloch
-# state must be evaluated on the SAME WS grid with the SAME Bloch phase that
-# was used when building the density matrix:
-#   psi_{n,k}(r_ws_p) = u_{n,k}(r_prim_p) * exp(2πi k · r_ws_frac_cont_p)
-# This is the identical _to_psi logic used in Wavecar_to_Coeff.py.
-_ws_enabled_file = output_dir / "ws_enabled.npy"
-ws_mode = _ws_enabled_file.exists() and bool(np.load(_ws_enabled_file))
 
 
 # ── data containers (from plot_vasp_bs.py) ────────────────────────────────────
@@ -304,48 +301,16 @@ def make_segments(x, y, w, interpolate, n_interp):
 # ── load saved CNO data ───────────────────────────────────────────────────────
 cno_orbs = np.load(cno_orb_file)
 cno_occ  = np.load(cno_occ_file)
-Nx, Ny, Nz = np.load(grid_shape_file).astype(int)
-Nr = Nx * Ny * Nz
+quadrature = SavedCNOQuadrature.load(output_dir)
+quadrature.validate_cno_rows(cno_orbs)
+Nx, Ny, Nz = quadrature.sample_grid_shape
+Nr = quadrature.n_samples
 
 print(f"Loaded CNO orbitals   : {cno_orb_file}  shape={cno_orbs.shape}")
 print(f"Loaded CNO occupations: {cno_occ_file}  n={len(cno_occ)}")
-print(f"FFT grid shape        : ({Nx}, {Ny}, {Nz})  Nr={Nr}")
-print(f"WS mode               : {ws_mode}")
-
-if ws_mode:
-    _ws_files = {
-        "ws_base_indices.npy":    output_dir / "ws_base_indices.npy",
-        "ws_points_frac_cont.npy": output_dir / "ws_points_frac_cont.npy",
-    }
-    for fname, p in _ws_files.items():
-        if not p.exists():
-            raise FileNotFoundError(
-                f"WS mode active but {fname} not found: {p}\n"
-                "Rerun Wavecar_to_Coeff.py to regenerate WS map files."
-            )
-    _prim_indices   = np.load(output_dir / "ws_base_indices.npy")
-    _r_for_phase    = np.load(output_dir / "ws_points_frac_cont.npy")
-    print(f"WS map loaded         : prim_indices={_prim_indices.shape}  "
-          f"r_ws_frac_cont={_r_for_phase.shape}")
-
-    def _to_psi(u_3d: np.ndarray, k_frac: np.ndarray) -> np.ndarray:
-        """Reindex u grid to WS ordering and apply Bloch phase."""
-        u_ws = u_3d[_prim_indices[:, 0], _prim_indices[:, 1], _prim_indices[:, 2]]
-        return u_ws * np.exp(2j * np.pi * (_r_for_phase @ k_frac))
-
-else:
-    _ix, _iy, _iz = [a.ravel() for a in np.mgrid[0:Nx, 0:Ny, 0:Nz]]
-    _r_for_phase   = np.column_stack([_ix / Nx, _iy / Ny, _iz / Nz])
-
-    def _to_psi(u_3d: np.ndarray, k_frac: np.ndarray) -> np.ndarray:
-        """Flatten u grid and apply Bloch phase at primitive positions."""
-        return u_3d.reshape(Nr) * np.exp(2j * np.pi * (_r_for_phase @ k_frac))
-
-if cno_orbs.shape[0] != Nr:
-    raise ValueError(
-        f"cno_orbitals.npy has {cno_orbs.shape[0]} grid points "
-        f"but fft_grid_shape gives Nr={Nr}."
-    )
+print(f"Saved quadrature       : {quadrature.method}; samples={Nr}; "
+      f"sample grid=({Nx}, {Ny}, {Nz}); source grid={quadrature.source_fft_grid}; "
+      f"expanded={quadrature.expanded}")
 n_cno_avail = cno_orbs.shape[1]
 for idx in cno_indices:
     if idx < 0 or idx >= n_cno_avail:
@@ -355,11 +320,9 @@ for idx in cno_indices:
         )
 
 # ── prepare selected CNOs ─────────────────────────────────────────────────────
-# Build (n_cnos, Nr) matrix of unit-normalised CNO row vectors.
-_cnos_raw   = np.stack([cno_orbs[:, idx] for idx in cno_indices])       # (n_cnos, Nr)
-_norms      = np.sqrt(np.sum(np.abs(_cnos_raw) ** 2, axis=1, keepdims=True))
-cnos_matrix = _cnos_raw / _norms
-cnos_conj   = cnos_matrix.conj()   # precomputed for fast inner products
+# Build rows <CNO_i| W with individual weighted pseudo-field normalization.
+_cnos_raw = cno_orbs[:, cno_indices]                                    # (Nr, n_cnos)
+cnos_bra = quadrature.normalized_weighted_bra(_cnos_raw)                # (n_cnos, Nr)
 
 print(f"\nSelected CNO indices  : {cno_indices}")
 for idx in cno_indices:
@@ -368,11 +331,7 @@ for idx in cno_indices:
 # ── load line-mode WAVECAR ────────────────────────────────────────────────────
 wfc = vaspwfc(str(wavecar_path), lsorbit=LSORBIT)
 
-if tuple(wfc._ngrid) != (Nx, Ny, Nz):
-    raise ValueError(
-        f"WAVECAR FFT grid {tuple(wfc._ngrid)} does not match "
-        f"saved grid ({Nx}, {Ny}, {Nz}) from fft_grid_shape.npy."
-    )
+quadrature.validate_source_fft_grid(wfc._ngrid)
 
 # ── build k-axis from KPOINTS + POSCAR (no KLABELS) ──────────────────────────
 kpath   = read_kpoints_line_mode(kpoints_path)
@@ -414,27 +373,19 @@ weights_all = np.zeros((n_cnos, nbands, nkpts))
 for ik in range(1, nkpts + 1):
     k_frac = eig.kpts_frac[ik - 1]
     gvec   = wfc.gvectors(ik)
-    gx     = gvec[:, 0] % Nx
-    gy     = gvec[:, 1] % Ny
-    gz     = gvec[:, 2] % Nz
-    nG     = len(gx)
+    nG     = len(gvec)
 
     for ib in range(1, nbands + 1):
         coeff      = wfc.readBandCoeff(ispin=ispin, ikpt=ik, iband=ib, norm=True)
-        coeff_grid = np.zeros((Nx, Ny, Nz), dtype=np.complex128)
 
         if LSORBIT:
-            coeff_grid_dn = np.zeros((Nx, Ny, Nz), dtype=np.complex128)
-            coeff_grid[gx, gy, gz]    = coeff[:nG]
-            coeff_grid_dn[gx, gy, gz] = coeff[nG:]
-            psi_up = _to_psi(np.fft.ifftn(coeff_grid)    * np.sqrt(Nr), k_frac)
-            psi_dn = _to_psi(np.fft.ifftn(coeff_grid_dn) * np.sqrt(Nr), k_frac)
-            weights_all[:, ib - 1, ik - 1] = (np.abs(cnos_conj @ psi_up) ** 2
-                                             + np.abs(cnos_conj @ psi_dn) ** 2)
+            psi_up = quadrature.bloch_field_from_coeff(coeff[:nG], gvec, k_frac)
+            psi_dn = quadrature.bloch_field_from_coeff(coeff[nG:], gvec, k_frac)
+            weights_all[:, ib - 1, ik - 1] = (np.abs(cnos_bra @ psi_up) ** 2
+                                             + np.abs(cnos_bra @ psi_dn) ** 2)
         else:
-            coeff_grid[gx, gy, gz] = coeff
-            psi = _to_psi(np.fft.ifftn(coeff_grid) * np.sqrt(Nr), k_frac)
-            weights_all[:, ib - 1, ik - 1] = np.abs(cnos_conj @ psi) ** 2
+            psi = quadrature.bloch_field_from_coeff(coeff, gvec, k_frac)
+            weights_all[:, ib - 1, ik - 1] = np.abs(cnos_bra @ psi) ** 2
 
     if ik == 1 or ik % 10 == 0 or ik == nkpts:
         w_sum_k = weights_all[:, :, ik - 1].sum(axis=0)
@@ -444,13 +395,20 @@ for ik in range(1, nkpts + 1):
 _render_3d = render_cno_3d
 if _render_3d:
     try:
-        from cno_visualizer.snapshot import render_density_gif
+        from cno_visualizer.snapshot import RegionalCNOMap, render_density_gif
         sys.path.insert(0, str(base_dir / "helper functions"))
         from ws_cell import read_poscar_structure
         _lat3d, _, _, _asym3d, _, _, _acart3d = read_poscar_structure(poscar_path)
-        print("3D snapshots         : ON  (CNO-Visualizer found)")
+        if quadrature.expanded:
+            _ws_center3d = np.load(output_dir / "ws_center_cart.npy")
+            _regional_visual_map = RegionalCNOMap.from_quadrature(quadrature, _ws_center3d)
+            _render_3d_kind = "CNO-Visualizer regional WS mesh"
+        else:
+            _regional_visual_map = None
+            _render_3d_kind = "CNO-Visualizer regular FFT grid"
+        print(f"3D snapshots         : ON  ({_render_3d_kind}; CNO-Visualizer found)")
     except Exception as exc:
-        print(f"3D snapshots         : OFF — CNO-Visualizer unavailable ({exc})")
+        print(f"3D snapshots         : OFF – CNO-Visualizer unavailable ({exc})")
         _render_3d = False
 
 # ── per-CNO output: weights, CSV, metadata, plots ────────────────────────────
@@ -479,11 +437,15 @@ for ci, idx in enumerate(cno_indices):
         fh.write(f"max_weight              : {w.max():.10f}\n")
         fh.write(f"efermi                  : {efermi}\n")
         fh.write(f"ispin                   : {ispin}\n")
-        fh.write(f"grid shape (Nx, Ny, Nz) : ({Nx}, {Ny}, {Nz})\n")
+        fh.write(f"sample grid shape       : ({Nx}, {Ny}, {Nz})\n")
+        fh.write(f"quadrature method       : {quadrature.method}\n")
+        fh.write(f"quadrature samples      : {quadrature.n_samples}\n")
+        fh.write(f"quadrature weight sum   : {quadrature.weights.sum():.10f}\n")
+        fh.write(f"source CNO field        : {field_name}\n")
         fh.write(f"nkpts                   : {nkpts}\n")
         fh.write(f"nbands                  : {nbands}\n")
         fh.write(f"k-axis source           : KPOINTS + POSCAR (Ang^-1)\n")
-        fh.write(f"ws_mode                 : {ws_mode}\n")
+        fh.write(f"expanded quadrature     : {quadrature.expanded}\n")
         fh.write("NOTE: weight = |<CNO | psi_nk>|^2\n")
         fh.write("NOTE: psi_nk(r) = u_nk(r) * exp(2*pi*i * k_frac . r_frac_cont)\n")
         fh.write("NOTE: in WS mode r_frac_cont is the continuous (unwrapped) WS coord\n")
@@ -564,18 +526,26 @@ for ci, idx in enumerate(cno_indices):
     if _render_3d:
         try:
             u3d = cno_orbs[:, idx]
-            if ws_mode:
-                g3 = np.zeros((Nx, Ny, Nz), dtype=np.complex128)
-                g3[_prim_indices[:, 0], _prim_indices[:, 1], _prim_indices[:, 2]] = u3d
-            else:
-                g3 = u3d.reshape(Nx, Ny, Nz)
             gif_path = fatband_dir / f"cno_{idx:03d}_structure.gif"
-            render_density_gif(
-                g3, _lat3d, _acart3d, _asym3d, str(gif_path),
-                iso_fraction=cno_3d_iso, replication=cno_3d_replicate,
-                seconds=cno_3d_seconds, fps=cno_3d_fps,
-                deg_per_sec=cno_3d_deg_per_sec, spin_axis=cno_3d_spin_axis,
-            )
+            if quadrature.expanded:
+                render_density_gif(
+                    u3d, _lat3d, _acart3d, _asym3d, str(gif_path),
+                    regional_map=_regional_visual_map,
+                    iso_fraction=cno_3d_iso, seconds=cno_3d_seconds, fps=cno_3d_fps,
+                    deg_per_sec=cno_3d_deg_per_sec, spin_axis=cno_3d_spin_axis,
+                    show_axes=False,
+                )
+            else:
+                g3 = np.zeros((Nx, Ny, Nz), dtype=np.complex128)
+                g3[quadrature.base_indices[:, 0],
+                   quadrature.base_indices[:, 1],
+                   quadrature.base_indices[:, 2]] = u3d
+                render_density_gif(
+                    g3, _lat3d, _acart3d, _asym3d, str(gif_path),
+                    iso_fraction=cno_3d_iso, replication=cno_3d_replicate,
+                    seconds=cno_3d_seconds, fps=cno_3d_fps,
+                    deg_per_sec=cno_3d_deg_per_sec, spin_axis=cno_3d_spin_axis,
+                )
             print(f"  CNO {idx:3d}  3D isosurface → {gif_path.name}")
         except Exception as exc:
             print(f"  CNO {idx:3d}  3D render skipped: {exc}")

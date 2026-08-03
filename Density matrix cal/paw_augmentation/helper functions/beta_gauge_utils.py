@@ -30,6 +30,31 @@ def read_eigenval_kweights(path, nkpts_expected, nbands_expected):
     return kweights
 
 
+def read_eigenval_energies(path, nkpts_expected, nbands_expected):
+    """Parse per-band energies from a BZ-mesh EIGENVAL: (nkpts, nbands),
+    spin-up (column 1) only -- same file, same layout read_eigenval_kweights
+    reads for k-weights, just also keeping the per-band energy column this
+    time. Used only for RESTRICT_TO_FERMI_WINDOW-style band selection
+    (main.py's _read_eigenval does the equivalent parse); raises ValueError
+    on a dimension mismatch, same convention as read_eigenval_kweights."""
+    with open(path) as fh:
+        lines = fh.readlines()
+    nkpts = int(lines[5].split()[1])
+    nbands = int(lines[5].split()[2])
+    if nkpts != nkpts_expected or nbands != nbands_expected:
+        raise ValueError("EIGENVAL/WAVECAR dimension mismatch")
+    energies = np.zeros((nkpts, nbands))
+    idx = 6
+    for ik in range(nkpts):
+        while not lines[idx].split():
+            idx += 1
+        idx += 1
+        for ib in range(nbands):
+            energies[ik, ib] = float(lines[idx].split()[1])
+            idx += 1
+    return energies
+
+
 def gauge_correct_beta(beta_recip, k_frac, elements_idx, pawpp, frac_coords):
     """Multiply each atom's projector-channel block of a paw.nonlq.proj()
     beta array by exp(2*pi*i * k_frac . tau_atom_frac), converting

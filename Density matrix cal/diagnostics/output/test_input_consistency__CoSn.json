@@ -21,9 +21,9 @@
       "size_bytes": 103079232
     },
     "POTCAR": {
-      "present": false,
-      "sha256": null,
-      "size_bytes": null
+      "present": true,
+      "sha256": "4d2562708e82b71137aa9011d0b96226bf2fff1b0db685bc8b0e1bfad860b777",
+      "size_bytes": 466096
     },
     "POSCAR": {
       "present": true,
