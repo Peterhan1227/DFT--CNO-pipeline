@@ -3,10 +3,13 @@ cno_fatband_combined.py
 
 Combined multi-CNO fatband plot, built entirely from cno_fatband.py's
 already-saved output (cno_{idx:03d}_weights.npy) -- does NOT reload the
-WAVECAR or recompute any projections. Each selected CNO gets its own solid
-color; per-(band,k) opacity encodes |<CNO|psi_nk>|^2, so overlapping CNO
-character shows up as layered/blended color instead of competing on a
-single shared white-to-red scale.
+WAVECAR or recompute any projections.  A colour group is one CNO or a chosen
+CNO subspace.  Its plotted weight is the sum of the members' overlaps, so a
+degenerate group has one colour and a basis-independent intensity.
+
+The colour is blended from white to saturated hue according to that total
+overlap.  Every band remains visible as a faint neutral guide where no
+selected group contributes.
 
 Reads:
   output/<SUBDIR>/cno_fatband/cno_{idx:03d}_weights.npy   (from cno_fatband.py)
@@ -36,18 +39,36 @@ from config import EFERMI
 
 # ── user settings ────────────────────────────────────────────────────────────
 ispin              = 1
-cno_indices        = [0, 1, 2]      # which saved CNOs to combine
-cno_colors         = None                  # None = auto (tab10-ish); or a list of
-                                            # matplotlib colors, same length as cno_indices
+# Set this list directly to choose grouping, colour and legend label.  The
+# default matches the first five W-centred WSe2 CNOs: [1,2] and [3,4] are
+# degenerate pairs, so each pair is intentionally plotted as one coloured
+# subspace.  The group weight is sum_i |<CNO_i|psi>|^2.
+#
+# Example for another output:
+# cno_color_groups = [
+#     {"indices": [0],    "color": "#1f77b4", "label": "CNO 0"},
+#     {"indices": [1, 2], "color": "darkorange", "label": "E doublet (1, 2)"},
+#     {"indices": [3, 4], "color": "#2ca02c", "label": "E doublet (3, 4)"},
+# ]
+cno_color_groups = [
+    {"indices": [0],    "color": "#b41f1f", "label": "CNO 0"},
+    {"indices": [1, 2], "color": "#f576f9", "label": "CNO 1-2"},
+    {"indices": [3, 4], "color": "#2fc62f", "label": "CNO 3-4"},
+]
+
+# Set cno_color_groups = None to use one automatic colour per entry here.
+cno_indices        = list(range(5))
 efermi             = EFERMI
-ylim               = [-10, 10]
+ylim               = [-5, 5]
 linewidth          = 3.0
-max_alpha          = 0.95                  # opacity at weight == vmax (per CNO, see below)
-per_cno_vmax       = None                  # None = each CNO normalized to its OWN max weight;
-                                            # or a float to use one shared scale for all CNOs
+max_alpha          = 0.95                  # saturation at weight == vmax (per CNO, see below)
+per_group_vmax     = None                  # None = each group normalized to its OWN max weight;
+                                            # or a float to use one shared scale for all groups
 output_file        = "cno_combined_fatband.png"
 interpolate_for_plot      = False
 interp_points_per_segment = 3
+base_band_color    = "0.88"                # nearly white: zero selected-CNO character
+base_band_linewidth = 0.55
 
 # ── paths ─────────────────────────────────────────────────────────────────────
 base_dir      = Path(__file__).resolve().parent
@@ -247,6 +268,26 @@ def make_segments(x, y, w, interpolate, n_interp):
     return segs, w_avg
 
 
+def resolve_color_groups(groups, fallback_indices):
+    """Validate explicit groups or construct one auto-coloured group per CNO."""
+    palette = list(plt.get_cmap("tab10").colors) + list(plt.get_cmap("tab20").colors)
+    if groups is None:
+        groups = [{"indices": [idx]} for idx in fallback_indices]
+    resolved, seen = [], set()
+    for group_index, group in enumerate(groups):
+        indices = [int(index) for index in group.get("indices", [])]
+        if not indices:
+            raise ValueError(f"Colour group {group_index} has no CNO indices")
+        repeated = seen.intersection(indices)
+        if repeated:
+            raise ValueError(f"CNO indices appear in more than one colour group: {sorted(repeated)}")
+        seen.update(indices)
+        color = to_rgb(group.get("color", palette[group_index % len(palette)]))
+        label = str(group.get("label", "CNO " + ", ".join(map(str, indices))))
+        resolved.append({"indices": indices, "color": color, "label": label})
+    return resolved
+
+
 # ── load axis data (no WAVECAR needed -- KPOINTS/POSCAR/EIGENVAL only) ───────
 
 kpath = read_kpoints_line_mode(kpoints_path)
@@ -271,9 +312,10 @@ print(f"KPOINTS  : {' → '.join(klabels)}")
 # ── load cached per-CNO weights (from cno_fatband.py) ────────────────────────
 
 cno_occ = np.load(cno_occ_file) if cno_occ_file.exists() else None
+color_groups = resolve_color_groups(cno_color_groups, cno_indices)
 
 weights_by_cno = {}
-for idx in cno_indices:
+for idx in sorted({idx for group in color_groups for idx in group["indices"]}):
     wpath = fatband_dir / f"cno_{idx:03d}_weights.npy"
     if not wpath.exists():
         raise FileNotFoundError(
@@ -289,20 +331,20 @@ for idx in cno_indices:
     occ_str = f"{cno_occ[idx]:.4f}" if cno_occ is not None else "?"
     print(f"  loaded CNO {idx:3d} (occ={occ_str})  max_w={w.max():.4f}")
 
-if cno_colors is None:
-    palette = list(plt.get_cmap("tab10").colors) + list(plt.get_cmap("tab20").colors)
-    cno_colors = [palette[i % len(palette)] for i in range(len(cno_indices))]
-cno_colors = [to_rgb(c) for c in cno_colors]
-
 # ── combined plot ─────────────────────────────────────────────────────────────
 
 fig, ax = plt.subplots(figsize=(9, 5.5))
 for b in range(nbands):
-    ax.plot(kdistances, energies_shifted[b], 'k:', linewidth=0.5, zorder=1)
+    ax.plot(kdistances, energies_shifted[b], color=base_band_color,
+            linewidth=base_band_linewidth, zorder=1)
 
 legend_handles = []
-for (idx, w), color in zip(weights_by_cno.items(), cno_colors):
-    vmax = per_cno_vmax if per_cno_vmax is not None else w.max()
+for group in color_groups:
+    indices, color, label = group["indices"], group["color"], group["label"]
+    # This sum is invariant under a unitary rotation inside a degenerate CNO
+    # block, which is exactly why a degenerate subspace should have one colour.
+    w = np.sum([weights_by_cno[idx] for idx in indices], axis=0)
+    vmax = per_group_vmax if per_group_vmax is not None else w.max()
     vmax = vmax if vmax > 0 else 1.0
 
     all_segs, all_alpha = [], []
@@ -314,15 +356,23 @@ for (idx, w), color in zip(weights_by_cno.items(), cno_colors):
     all_segs = np.concatenate(all_segs, axis=0)
     all_alpha = np.clip(np.concatenate(all_alpha) / vmax, 0.0, 1.0) * max_alpha
 
+    # Alpha compositing over the white background produces the requested
+    # white -> pale hue -> saturated hue ramp.  It also lets simultaneous
+    # CNO character blend instead of letting one CNO hide the others.
     rgba = np.tile(np.array([*color, 0.0]), (len(all_segs), 1))
     rgba[:, 3] = all_alpha
 
     lc = LineCollection(all_segs, colors=rgba, linewidth=linewidth, zorder=2)
     ax.add_collection(lc)
 
-    occ_str = f"{cno_occ[idx]:.4f}" if cno_occ is not None else "?"
+    if cno_occ is None:
+        occ_str = "?"
+    elif len(indices) == 1:
+        occ_str = f"occ={cno_occ[indices[0]]:.4f}"
+    else:
+        occ_str = "occ=[" + ", ".join(f"{cno_occ[idx]:.4f}" for idx in indices) + "]"
     legend_handles.append(plt.Line2D([0], [0], color=color, lw=3,
-                                      label=f"CNO {idx} (occ={occ_str})"))
+                                      label=f"{label} ({occ_str})"))
 
 for tick in kticks:
     ax.axvline(tick, color="0.75", lw=0.8, zorder=0)
@@ -331,7 +381,7 @@ ax.set_xticks(kticks)
 ax.set_xticklabels(klabels)
 ax.set_ylabel(r"$E - E_F$ (eV)")
 ax.set_xlabel("k-path")
-ax.set_title(f"Combined CNO fatband: {cno_indices}")
+ax.set_title("Combined CNO fatband: " + ", ".join(group["label"] for group in color_groups))
 ax.set_xlim(kdistances[0], kdistances[-1])
 ax.set_ylim(ylim)
 ax.legend(handles=legend_handles, fontsize=8, loc="best")

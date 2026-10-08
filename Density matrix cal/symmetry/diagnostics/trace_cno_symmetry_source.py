@@ -45,8 +45,10 @@ sys.path.insert(0, str(PIPELINE_DIR / "helper functions"))
 sys.path.insert(0, str(PAW_DIR / "helper functions"))
 
 import cno_symmetry as symmetry  # noqa: E402
-from config import (EFERMI, FERMI_WINDOW_EV, ISPIN, MATERIAL, OUTPUT_SUBDIR,
+import config  # noqa: E402
+from config import (EFERMI, ISPIN, MATERIAL, OUTPUT_SUBDIR,
                     RESTRICT_TO_FERMI_WINDOW, WS_CENTER, WS_CENTER_COORD_TYPE)  # noqa: E402
+from energy_window import in_fermi_window, resolve_fermi_window_range  # noqa: E402
 from beta_gauge_utils import read_eigenval_energies, read_eigenval_kweights  # noqa: E402
 from realspace_beta import zero_pad_ifft  # noqa: E402
 from ws_cell import read_poscar_structure  # noqa: E402
@@ -65,7 +67,9 @@ def _json(value):
 def _selection(wfc: vaspwfc, energies: np.ndarray | None, ik: int) -> tuple[np.ndarray, np.ndarray]:
     if RESTRICT_TO_FERMI_WINDOW:
         assert energies is not None
-        bands = np.where(np.abs(energies[ik - 1] - EFERMI) <= FERMI_WINDOW_EV)[0] + 1
+        bands = np.where(in_fermi_window(
+            energies[ik - 1], EFERMI, resolve_fermi_window_range(config)
+        ))[0] + 1
         return bands, np.ones(len(bands))
     occ = wfc._occs[ISPIN - 1, ik - 1, :]
     bands = np.where(occ > 1.0e-6)[0] + 1

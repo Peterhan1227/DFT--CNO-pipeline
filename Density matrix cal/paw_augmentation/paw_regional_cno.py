@@ -40,6 +40,7 @@ from ws_cell import (read_poscar_structure, parse_ws_center, build_ws_grid_map,
                      build_ws_weighted_tie_map, build_ws_finite_volume_map,
                      ws_polyhedron)  # noqa: E402
 from direct_fourier import ws_membership  # noqa: E402
+from energy_window import in_fermi_window, resolve_fermi_window_range  # noqa: E402
 
 from vaspwfc import vaspwfc  # noqa: E402
 from paw import nonlq  # noqa: E402
@@ -518,7 +519,8 @@ def load_system(material=None, ws_center=None, ws_center_coord_type=None, ws_nma
     # occ_all > OCC_TOL selection. See build_state_list_and_beta().
     restrict_to_fermi_window = bool(config.RESTRICT_TO_FERMI_WINDOW)
     efermi = config.EFERMI if restrict_to_fermi_window else None
-    fermi_window_ev = config.FERMI_WINDOW_EV if restrict_to_fermi_window else None
+    fermi_window_range = (resolve_fermi_window_range(config)
+                          if restrict_to_fermi_window else None)
     band_energies = None
     try:
         band_energies = read_eigenval_energies(data_dir / "EIGENVAL", wfc._nkpts, wfc._nbands)
@@ -530,8 +532,8 @@ def load_system(material=None, ws_center=None, ws_center_coord_type=None, ws_nma
                 "EIGENVAL matches the WAVECAR."
             ) from e
     if restrict_to_fermi_window:
-        n_win = int(np.sum(np.abs(band_energies - efermi) <= fermi_window_ev))
-        print(f"  Fermi window [{efermi-fermi_window_ev:.3f}, {efermi+fermi_window_ev:.3f}] eV "
+        n_win = int(np.sum(in_fermi_window(band_energies, efermi, fermi_window_range)))
+        print(f"  Fermi window E-EF in [{fermi_window_range[0]:.3f}, {fermi_window_range[1]:.3f}] eV "
               f"({n_win}/{band_energies.size} states in window)")
 
     ws_center = ws_center if ws_center is not None else config.WS_CENTER
@@ -580,7 +582,7 @@ def load_system(material=None, ws_center=None, ws_center_coord_type=None, ws_nma
         atoms=atoms, qij_block=qij_block, channel_ranges=channel_ranges,
         kweights=kweights, center_cart=center_cart, ws_nmax=ws_nmax,
         restrict_to_fermi_window=restrict_to_fermi_window, efermi=efermi,
-        fermi_window_ev=fermi_window_ev, band_energies=band_energies,
+        fermi_window_range=fermi_window_range, band_energies=band_energies,
         Nx=Nx, Ny=Ny, Nz=Nz, Nr=Nr, native_nr=native_nr,
         source_fft_grid=fft_grid, quadrature_factor=quadrature_factor,
         r_ws_cart=r_ws_cart,
@@ -666,8 +668,8 @@ def _select_bands(sys_, ik):
     build_state_list_and_beta() and every validation check below so
     production and validation always see the SAME state set. Two modes:
 
-    RESTRICT_TO_FERMI_WINDOW=True (config.py): every band within
-    ±FERMI_WINDOW_EV of EFERMI gets occupation 1 (including empty
+    RESTRICT_TO_FERMI_WINDOW=True (config.py): every band within the explicit
+    inclusive ``FERMI_WINDOW_RANGE_EV`` relative to EFERMI gets occupation 1 (including empty
     conduction bands) -- same semantics as main.py.
 
     Otherwise: the usual occ_all > OCC_TOL selection, halved if VASP
@@ -675,7 +677,7 @@ def _select_bands(sys_, ik):
     wfc = sys_["wfc"]
     if sys_["restrict_to_fermi_window"]:
         energies_ik = sys_["band_energies"][ik - 1]
-        mask = np.abs(energies_ik - sys_["efermi"]) <= sys_["fermi_window_ev"]
+        mask = in_fermi_window(energies_ik, sys_["efermi"], sys_["fermi_window_range"])
         bands = np.where(mask)[0] + 1
         occ = np.ones(len(bands), dtype=float)
     else:
@@ -1461,6 +1463,9 @@ def main(material=None, ws_center=None, ws_center_coord_type=None, ws_nmax=None,
     full_report = dict(
         material=sys_["material"], output_subdir=output_subdir_eff,
         nstates=len(states), n_sites=len(sites),
+        restrict_to_fermi_window=sys_["restrict_to_fermi_window"],
+        fermi_window_relative_ev=(list(sys_["fermi_window_range"])
+                                  if sys_["fermi_window_range"] is not None else None),
         ws_quadrature=dict(method=sys_["ws_quadrature"], n_samples=sys_["Nr"],
                            n_native_nodes=sys_["native_nr"],
                            source_fft_grid=sys_["source_fft_grid"],
@@ -1494,6 +1499,9 @@ def main(material=None, ws_center=None, ws_center_coord_type=None, ws_nmax=None,
             gate_note += " -- but a GROSS failure was found post-hoc, see below"
         f.write(f"gate_status: {gate_note}\n\n")
         f.write(f"material: {sys_['material']}  nstates: {len(states)}  n_sites: {len(sites)}\n")
+        if sys_["restrict_to_fermi_window"]:
+            f.write("fermi_window_relative_ev: "
+                    f"[{sys_['fermi_window_range'][0]:.6f}, {sys_['fermi_window_range'][1]:.6f}]\n")
         f.write(f"ws_quadrature: {sys_['ws_quadrature']}  samples: {sys_['Nr']}  "
                 f"native_nodes: {sys_['native_nr']}  "
                 f"source_fft_grid: {sys_['source_fft_grid'].tolist()}  "

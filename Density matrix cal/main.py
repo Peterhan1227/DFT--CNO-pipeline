@@ -32,6 +32,7 @@ PAW_DIR = HERE / "paw_augmentation"
 sys.path.insert(0, str(HELPERS))
 
 from plane_wave import bloch_fields_on_samples  # noqa: E402
+from energy_window import in_fermi_window, resolve_fermi_window_range  # noqa: E402
 from ws_cell import (  # noqa: E402
     build_ws_finite_volume_map,
     build_ws_grid_map,
@@ -116,14 +117,14 @@ def _load_kpoint_data(wfc, data_dir: Path):
 
 
 def _select_bands(wfc, ik: int, *, ispin: int, restrict_to_fermi_window: bool,
-                  energies, efermi, fermi_window_ev):
+                  energies, efermi, fermi_window_range):
     """The one band-selection rule used by the direct pseudo path."""
     if restrict_to_fermi_window:
         if energies is None:
             raise RuntimeError(
                 "RESTRICT_TO_FERMI_WINDOW=True requires a matching EIGENVAL with band energies."
             )
-        keep = np.abs(energies[ik - 1] - efermi) <= fermi_window_ev
+        keep = in_fermi_window(energies[ik - 1], efermi, fermi_window_range)
         bands = np.where(keep)[0] + 1
         return bands, np.ones(len(bands), dtype=float)
     occupations = np.asarray(wfc._occs[ispin - 1, ik - 1], dtype=float)
@@ -188,14 +189,14 @@ def _build_quadrature(latvec, source_grid, *, use_ws_cell: bool, center, center_
 
 def _build_pseudo_state_matrix(wfc, quadrature, kfrac_all, kweights, *, lsorbit: bool,
                                ispin: int, restrict_to_fermi_window: bool,
-                               energies, efermi, fermi_window_ev):
+                               energies, efermi, fermi_window_range):
     """Evaluate every included pseudo Bloch state on the shared WS samples."""
     by_k = []
     n_columns = 0
     for ik in range(1, wfc._nkpts + 1):
         bands, occupations = _select_bands(
             wfc, ik, ispin=ispin, restrict_to_fermi_window=restrict_to_fermi_window,
-            energies=energies, efermi=efermi, fermi_window_ev=fermi_window_ev,
+            energies=energies, efermi=efermi, fermi_window_range=fermi_window_range,
         )
         if len(bands):
             by_k.append((ik, bands, occupations))
@@ -344,6 +345,8 @@ def _main_pseudo(*, material=None, output_subdir=None, ws_quadrature=None,
     latvec, species, counts, _, _, frac_coords, _ = read_poscar_structure(data_dir / "POSCAR")
     volume = abs(float(np.linalg.det(latvec)))
     kfrac, kweights, energies, kcoord_source, kweight_source, mismatch_note = _load_kpoint_data(wfc, data_dir)
+    fermi_window_range = (resolve_fermi_window_range(config)
+                          if config.RESTRICT_TO_FERMI_WINDOW else None)
     if kweight_source == "uniform fallback":
         print("WARNING: uniform k-point weights are valid only for a fully unreduced mesh (ISYM=0).")
 
@@ -361,16 +364,17 @@ def _main_pseudo(*, material=None, output_subdir=None, ws_quadrature=None,
     if config.RESTRICT_TO_FERMI_WINDOW:
         if energies is None:
             raise RuntimeError("Fermi-window selection needs a matching EIGENVAL")
-        selected = int(np.sum(np.abs(energies - config.EFERMI) <= config.FERMI_WINDOW_EV))
-        print(f"Fermi window: {selected}/{energies.size} states in "
-              f"[{config.EFERMI-config.FERMI_WINDOW_EV:.3f}, "
-              f"{config.EFERMI+config.FERMI_WINDOW_EV:.3f}] eV")
+        selected = int(np.sum(in_fermi_window(energies, config.EFERMI, fermi_window_range)))
+        print(f"Fermi window: {selected}/{energies.size} states with E-EF in "
+              f"[{fermi_window_range[0]:.3f}, {fermi_window_range[1]:.3f}] eV "
+              f"(absolute [{config.EFERMI+fermi_window_range[0]:.3f}, "
+              f"{config.EFERMI+fermi_window_range[1]:.3f}] eV)")
 
     t0 = time.perf_counter()
     psi, state_weights, states = _build_pseudo_state_matrix(
         wfc, quadrature, kfrac, kweights, lsorbit=config.LSORBIT, ispin=config.ISPIN,
         restrict_to_fermi_window=config.RESTRICT_TO_FERMI_WINDOW, energies=energies,
-        efermi=config.EFERMI, fermi_window_ev=config.FERMI_WINDOW_EV,
+        efermi=config.EFERMI, fermi_window_range=fermi_window_range,
     )
     occupations, cnos, gram, kernel, overlap = _solve_pseudo_cnos(
         psi, state_weights, quadrature["weights"],
@@ -391,6 +395,8 @@ def _main_pseudo(*, material=None, output_subdir=None, ws_quadrature=None,
         lsorbit=bool(config.LSORBIT),
         ispin=int(config.ISPIN),
         restrict_to_fermi_window=bool(config.RESTRICT_TO_FERMI_WINDOW),
+        fermi_window_relative_ev=(list(fermi_window_range)
+                                  if fermi_window_range is not None else None),
         source_fft_grid=[int(x) for x in source_grid],
         sample_grid=[int(x) for x in quadrature["grid"]],
         ws_quadrature=quadrature["method"],

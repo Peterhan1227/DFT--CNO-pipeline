@@ -29,9 +29,18 @@ WS_QUADRATURE_FACTOR = 1
 # ── density matrix settings ───────────────────────────────────────────────────
 ISPIN = 1                      # 1 = spin-up / non-spin-polarised,  2 = spin-down
 
-RESTRICT_TO_FERMI_WINDOW = True   # True = include only bands within ±FERMI_WINDOW_EV of EFERMI
-EFERMI          = -2.229           # Fermi energy (eV); used only when RESTRICT_TO_FERMI_WINDOW = True
-FERMI_WINDOW_EV = 3.0              # half-width of the energy window (eV)
+RESTRICT_TO_FERMI_WINDOW = True
+EFERMI = -2.229                     # Fermi energy (eV)
+
+# When the restriction is on, include EVERY state with
+#     FERMI_WINDOW_RANGE_EV[0] <= E_nk - EFERMI <= FERMI_WINDOW_RANGE_EV[1]
+# (both endpoints inclusive), and assign it f_nk = 1 for the regional CNO
+# construction.  This can be asymmetric, e.g. [-3.0, 0.0] for valence only.
+FERMI_WINDOW_RANGE_EV = [-3.0, 3.0]
+
+# Compatibility fallback for archived scripts only.  Active code uses the
+# explicit range above; set FERMI_WINDOW_RANGE_EV = None to recover ± this value.
+FERMI_WINDOW_EV = 3.0
 
 # ── Wigner-Seitz cell settings ────────────────────────────────────────────────
 USE_WS_CELL = True
