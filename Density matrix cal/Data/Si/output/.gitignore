@@ -1,0 +1,4 @@
+# Calculation outputs are material-local and can be regenerated.
+*
+!.gitignore
+!*/

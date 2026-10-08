@@ -1,4 +1,4 @@
-# Local historical scripts only.  Keep the directory as a convenient archive,
-# but never add its contents to the repository again.
-*
-!.gitignore
+# Historical scripts, tracked on the backup branch as a full snapshot.
+__pycache__/
+# The root WAVECAR* rule matches this script's name case-insensitively on Windows.
+!Wavecar_to_Coeff copy.py
